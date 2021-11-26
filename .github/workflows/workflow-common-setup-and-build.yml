@@ -19,10 +19,6 @@ on:
         required: true
         type: boolean
 
-      runTests:
-        required: true
-        type: boolean
-
 jobs:
   build:
     runs-on: windows-2022
@@ -103,7 +99,6 @@ jobs:
       working-directory: src
 
     - name: Run Unit Tests and Generate Coverage
-      if: inputs.runTests == true
       uses: glennawatson/coverlet-msbuild@v1
       with:
         project-files: '**/*Tests*.csproj'
@@ -115,7 +110,6 @@ jobs:
         configuration: ${{ inputs.configuration }}
 
     - name: Upload Code Coverage
-      if: inputs.runTests == true
       shell: bash
       run: |
         echo $PWD
