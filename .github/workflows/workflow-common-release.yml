@@ -21,6 +21,8 @@ on:
 
 jobs:
   build-and-release:
+    environment:
+      name: release      
     runs-on: windows-2022
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
