@@ -19,10 +19,6 @@ on:
         required: true
         type: boolean
 
-      runTests:
-        required: true
-        type: boolean
-
 jobs:
   build-and-release:
     runs-on: windows-2022
