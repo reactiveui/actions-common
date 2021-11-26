@@ -22,7 +22,16 @@ on:
       solutionFile:
         required: false
         type: string
-
+    secrets:
+      SIGN_CLIENT_USER_ID:
+        required: true
+      SIGN_CLIENT_SECRET:
+        required: true
+      SIGN_CLIENT_CONFIG:
+        required: true
+      NUGET_API_KEY:
+        required: true
+        
 jobs:
   build-and-release:
     environment:
