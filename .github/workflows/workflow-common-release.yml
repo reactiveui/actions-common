@@ -19,6 +19,10 @@ on:
         required: true
         type: boolean
 
+      solutionFile:
+        required: false
+        type: string
+
 jobs:
   build-and-release:
     environment:
@@ -75,12 +79,14 @@ jobs:
         dotnet workload install tvos
         dotnet workload install macos
         dotnet workload install maui
+        
     - name: Run Maui Installation Check
       if: inputs.useMauiCheckDotNetTool == true
       shell: bash
       run: |
         dotnet tool install -g Redth.Net.Maui.Check
         maui-check --non-interactive --fix
+        
     - name: Add MSBuild to PATH
       uses: glennawatson/setup-msbuild@v1.0.3
       with:
@@ -93,11 +99,11 @@ jobs:
         setAllVars: true
 
     - name: NuGet Restore
-      run: dotnet restore
+      run: dotnet restore ${{ inputs.solutionFile }}
       working-directory: src
 
     - name: Build
-      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }}
+      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: src
 
     - name: Create NuGet Artifacts
