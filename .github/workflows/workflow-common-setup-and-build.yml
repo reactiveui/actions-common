@@ -135,6 +135,7 @@ jobs:
         output-format: cobertura
         output: '../../artifacts/'
         configuration: ${{ inputs.configuration }}
+        working-directory: ${{ inputs.srcFolder }}
 
     - name: Upload Code Coverage
       shell: bash
