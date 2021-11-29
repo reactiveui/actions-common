@@ -128,7 +128,7 @@ jobs:
       uses: glennawatson/coverlet-msbuild@v1
       if: inputs.performTests == true
       with:
-        project-files: '**/*Tests*.csproj'
+        project-files: '${{ inputs.srcFolder }}/**/*Tests*.csproj'
         no-build: true
         exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
         include-filter: '[${{inputs.productNamespacePrefix}}*]*'
