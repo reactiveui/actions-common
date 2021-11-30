@@ -22,6 +22,14 @@ on:
       solutionFile:
         required: false
         type: string
+        description: 'Optional name of a solution file founded in the srcFolder'
+        
+      srcFolder:
+        required: false
+        type: string
+        default: 'src'
+        description: 'The folder where the source can be found'
+        
     secrets:
       SIGN_CLIENT_USER_ID:
         required: true
@@ -110,11 +118,11 @@ jobs:
 
     - name: NuGet Restore
       run: dotnet restore ${{ inputs.solutionFile }}
-      working-directory: src
+      working-directory: ${{ inputs.srcFolder }}
 
     - name: Build
       run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
-      working-directory: src
+      working-directory: ${{ inputs.srcFolder }}
 
     - name: Create NuGet Artifacts
       uses: actions/upload-artifact@master
