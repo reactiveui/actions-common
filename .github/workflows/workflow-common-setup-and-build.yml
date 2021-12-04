@@ -39,6 +39,18 @@ on:
         default: true
         type: boolean
         description: 'If tests need to be conducted'
+        
+      useNBGV:
+        required: false
+        default: true
+        type: boolean
+        description: 'If uses NBGV'
+        
+      createArtifacts:
+        required: false
+        default: true
+        type: boolean
+        description: 'If creates Artifacts'
 
 jobs:
   build:
@@ -111,6 +123,7 @@ jobs:
         prerelease: true
 
     - name: NBGV
+      if: inputs.useNBGV == true
       id: nbgv
       uses: dotnet/nbgv@master
       with:
@@ -146,6 +159,7 @@ jobs:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Create NuGet Artifacts
+      if: inputs.createArtifacts == true
       uses: actions/upload-artifact@master
       with:
         name: nuget
