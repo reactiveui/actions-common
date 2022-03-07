@@ -68,7 +68,7 @@ jobs:
         $process.Start()
         $process.WaitForExit()
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         fetch-depth: 0
         lfs: true
