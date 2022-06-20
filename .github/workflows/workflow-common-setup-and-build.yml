@@ -52,6 +52,18 @@ on:
         type: boolean
         description: 'If creates Artifacts'
 
+      installWindowsSdk:
+        required: false
+        default: true
+        type: boolean
+        description: 'If installs Windows SDK'
+
+      installWorkflows:
+        required: false
+        default: true
+        type: boolean
+        description: 'If installs Workflows'
+
 jobs:
   build:
     runs-on: windows-2022
@@ -68,6 +80,7 @@ jobs:
         echo "##vso[task.prependpath]$(vs where preview --prop=InstallationPath)\MSBuild\Current\Bin"
         
     - name: Install Windows SDK 10.0.16299
+      if: inputs.installWindowsSdk == true
       shell: pwsh
       run: |
         Invoke-WebRequest -Uri https://go.microsoft.com/fwlink/p/?linkid=864422 -OutFile winsdk.exe
@@ -85,16 +98,6 @@ jobs:
         fetch-depth: 0
         lfs: true
 
-    - name: Install .NET Core
-      uses: actions/setup-dotnet@v2
-      with:
-        dotnet-version: 3.1.x
-
-    - name: Install .NET 5
-      uses: actions/setup-dotnet@v2
-      with:
-        dotnet-version: 5.0.x
-
     - name: Install .NET 6
       uses: actions/setup-dotnet@v2
       with:
@@ -102,6 +105,7 @@ jobs:
         include-prerelease: true
 
     - name: Install DotNet workloads
+      if: inputs.installWorkflows == true
       shell: bash
       run: |
         dotnet workload install android
