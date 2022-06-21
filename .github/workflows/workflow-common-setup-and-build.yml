@@ -151,7 +151,6 @@ jobs:
         exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
         include-filter: '[${{inputs.productNamespacePrefix}}*]*'
         output-format: cobertura
-        output: '../../artifacts/'
         configuration: ${{ inputs.configuration }}
 
     - name: Upload Code Coverage
