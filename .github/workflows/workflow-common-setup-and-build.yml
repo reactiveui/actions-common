@@ -135,7 +135,7 @@ jobs:
         setAllVars: true
 
     - name: NuGet Restore
-      run: msbuild ${{ inputs.solutionFile }} /t:Restore /p:Configuration=${{ inputs.configuration }}
+      run: msbuild ${{ inputs.solutionFile }} /t:Restore /p:Configuration=${{ inputs.configuration }} /verbosity:minimal
       working-directory: ${{ inputs.srcFolder }}
 
     - name: Build
