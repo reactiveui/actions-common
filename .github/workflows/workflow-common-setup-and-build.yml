@@ -154,13 +154,8 @@ jobs:
         configuration: ${{ inputs.configuration }}
 
     - name: Upload Code Coverage
-      shell: bash
+      uses: codecov/codecov-action@v2
       if: inputs.performTests == true
-      run: |
-        echo $PWD
-        bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy -t ${{ env.CODECOV_TOKEN }} -f '*.xml'        
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
     - name: Create NuGet Artifacts
       if: inputs.createArtifacts == true
