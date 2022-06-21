@@ -158,7 +158,7 @@ jobs:
       if: inputs.performTests == true
       run: |
         echo $PWD
-        bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy -t ${{ env.CODECOV_TOKEN }} -s '$PWD/artifacts' -f '*.xml'        
+        bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy -t ${{ env.CODECOV_TOKEN }} -f '*.xml'        
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
