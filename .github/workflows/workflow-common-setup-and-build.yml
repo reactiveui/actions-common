@@ -154,7 +154,7 @@ jobs:
         configuration: ${{ inputs.configuration }}
 
     - name: Upload Code Coverage
-      uses: codecov/codecov-action@v2
+      uses: codecov/codecov-action@v3
       if: inputs.performTests == true
 
     - name: Create NuGet Artifacts
