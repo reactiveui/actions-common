@@ -48,6 +48,9 @@ jobs:
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:
+    - name: Support longpaths
+      run: git config --system core.longpaths true
+
     - name: Update Visual Studio preview
       if: inputs.useVisualStudioPreview == true
       shell: bash
