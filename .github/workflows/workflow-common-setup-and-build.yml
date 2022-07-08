@@ -108,12 +108,7 @@ jobs:
       if: inputs.installWorkflows == true
       shell: bash
       run: |
-        dotnet workload install android
-        dotnet workload install ios
-        dotnet workload install tvos
-        dotnet workload install macos
-        dotnet workload install maui
-        dotnet workload install maccatalyst
+        dotnet workload install android ios tvos macos maui maccatalyst
         
     - name: Run Maui Installation Check
       if: inputs.useMauiCheckDotNetTool == true
