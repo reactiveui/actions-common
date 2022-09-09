@@ -125,7 +125,7 @@ jobs:
     - name: NBGV
       if: inputs.useNBGV == true
       id: nbgv
-      uses: dotnet/nbgv@master
+      uses: dotnet/nbgv@main
       with:
         setAllVars: true
 
