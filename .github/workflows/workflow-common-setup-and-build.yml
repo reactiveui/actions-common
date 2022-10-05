@@ -102,7 +102,7 @@ jobs:
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: 6.0.x
-        include-prerelease: true
+        dotnet-quality: 'preview'
 
     - name: Install DotNet workloads
       if: inputs.installWorkflows == true
