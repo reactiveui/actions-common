@@ -75,9 +75,8 @@ jobs:
       shell: bash
       run: |
         dotnet tool update -g dotnet-vs
+        vs install preview Enterprise +mobile +desktop +uwp +web
         vs where preview
-        vs install preview
-        vs modify preview +mobile +desktop +uwp +web
         echo "##vso[task.prependpath]$(vs where preview --prop=InstallationPath)\MSBuild\Current\Bin"
         
     - name: Install Windows SDK 10.0.16299
