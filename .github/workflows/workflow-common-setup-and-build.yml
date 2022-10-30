@@ -75,7 +75,10 @@ jobs:
       shell: bash
       run: |
         dotnet tool update -g dotnet-vs
-        vs install preview Enterprise +mobile +desktop +uwp +web
+        vs where release
+        vs where preview
+        vs update preview Enterprise
+        vs modify preview Enterprise +mobile +desktop +uwp +web
         vs where preview
         echo "##vso[task.prependpath]$(vs where preview --prop=InstallationPath)\MSBuild\Current\Bin"
         
