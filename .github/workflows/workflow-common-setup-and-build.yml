@@ -159,7 +159,7 @@ jobs:
 
     - name: Build DotNet
       if: inputs.dotNetBuild == true
-      run: dotnet /c ${{ inputs.configuration }} ${{ inputs.solutionFile }}
+      run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
     - name: Run Unit Tests and Generate Coverage
