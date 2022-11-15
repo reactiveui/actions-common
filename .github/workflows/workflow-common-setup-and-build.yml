@@ -64,6 +64,12 @@ on:
         type: boolean
         description: 'If installs Workflows'
 
+      dotNetBuild:
+        required: false
+        default: false
+        type: boolean
+        description: 'If to use a SDK build'
+
 jobs:
   build:
     runs-on: windows-2022
@@ -138,12 +144,24 @@ jobs:
       with:
         setAllVars: true
 
-    - name: NuGet Restore
-      run: msbuild ${{ inputs.solutionFile }} /t:Restore /p:Configuration=${{ inputs.configuration }} /verbosity:minimal
+    - name: Install NuGet 
+      uses: nuget/setup-nuget@v1
+      with:
+        nuget-api-key: ${{ secrets.NuGetAPIKey }}
+        nuget-version: '6.x'
+
+    - name: NuGet Restore 
+      run: nuget restore ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
-    - name: Build
+    - name: Build MsBuild
+      if: inputs.dotNetBuild != true
       run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
+      working-directory: ${{ inputs.srcFolder }}
+
+    - name: Build DotNet
+      if: inputs.dotNetBuild == true
+      run: dotnet /c ${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
     - name: Run Unit Tests and Generate Coverage
