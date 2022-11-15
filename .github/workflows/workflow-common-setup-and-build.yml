@@ -111,13 +111,11 @@ jobs:
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: 6.0.x
-        dotnet-quality: 'preview'
 
     - name: Install .NET 7
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: 7.0.x
-        dotnet-quality: 'preview'
 
     - name: Install DotNet workloads
       if: inputs.installWorkflows == true
