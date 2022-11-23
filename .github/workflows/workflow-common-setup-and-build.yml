@@ -76,15 +76,13 @@ jobs:
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:
-    - name: Update Visual Studio preview
+    - name: Update Visual Studio Latest Release
       if: inputs.useVisualStudioPreview == true
       shell: bash
       run: |
         dotnet tool update -g dotnet-vs
         echo "## About RELEASE ##"
         vs where release
-        echo "## About PREVIEW ##"
-        vs where preview
         echo "## Update RELEASE ##"
         vs update release Enterprise
         vs modify release Enterprise +mobile +desktop +uwp +web
