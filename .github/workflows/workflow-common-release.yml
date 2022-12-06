@@ -102,9 +102,9 @@ jobs:
         maui-check --non-interactive --fix
         
     - name: Add MSBuild to PATH
-      uses: glennawatson/setup-msbuild@v1.0.3
+      uses: microsoft/setup-msbuild@v1.1.3
       with:
-        prerelease: true
+        vs-prerelease: true
 
     - name: NBGV
       id: nbgv
