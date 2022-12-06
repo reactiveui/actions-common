@@ -164,7 +164,7 @@ jobs:
       working-directory: ${{ inputs.srcFolder }}
 
     - name: Run Unit Tests and Generate Coverage
-      uses: glennawatson/coverlet-msbuild@v1
+      uses: glennawatson/coverlet-msbuild@v2
       if: inputs.performTests == true
       with:
         project-files: '${{ inputs.srcFolder }}/**/*Tests*.csproj'
