@@ -6,18 +6,22 @@ on:
       configuration:
         required: true
         type: string
+        description: 'The build configuration. Eg debug/release'
 
       productNamespacePrefix:
         required: true
         type: string
+        description: 'The namespace prefix used to exclude unrelated items for code coverage'
 
       useVisualStudioPreview:
         required: true
         type: boolean
+        description: 'If the Visual Studio preview edition is used'
 
       useMauiCheckDotNetTool:
         required: true
         type: boolean
+        description: 'Use the Maui Check dotnet tool to make sure Maui is up to date'
 
       solutionFile:
         required: false
@@ -30,6 +34,29 @@ on:
         default: 'src'
         description: 'The folder where the source can be found'
         
+      useNBGV:
+        required: false
+        default: true
+        type: boolean
+        description: 'If uses NBGV'
+        
+      createArtifacts:
+        required: false
+        default: true
+        type: boolean
+        description: 'If creates Artifacts'
+
+      installWorkflows:
+        required: false
+        default: true
+        type: boolean
+        description: 'If installs Workflows'
+
+      dotNetBuild:
+        required: false
+        default: false
+        type: boolean
+        description: 'If to use a SDK build'
     secrets:
       SIGN_CLIENT_USER_ID:
         required: true
@@ -39,11 +66,9 @@ on:
         required: true
       NUGET_API_KEY:
         required: true
-        
+
 jobs:
-  build-and-release:
-    environment:
-      name: release      
+  build:
     runs-on: windows-2022
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
@@ -83,6 +108,7 @@ jobs:
         dotnet-version: 7.0.x
 
     - name: Install DotNet workloads
+      if: inputs.installWorkflows == true
       shell: bash
       run: |
         dotnet workload install android ios tvos macos maui maccatalyst
@@ -100,20 +126,34 @@ jobs:
         vs-prerelease: true
 
     - name: NBGV
+      if: inputs.useNBGV == true
       id: nbgv
       uses: dotnet/nbgv@master
       with:
         setAllVars: true
 
-    - name: NuGet Restore
-      run: dotnet restore ${{ inputs.solutionFile }}
+    - name: Install NuGet 
+      uses: nuget/setup-nuget@v1
+      with:
+        nuget-api-key: ${{ secrets.NuGetAPIKey }}
+        nuget-version: '6.x'
+
+    - name: NuGet Restore 
+      run: nuget restore ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
-    - name: Build
+    - name: Build MsBuild
+      if: inputs.dotNetBuild != true
       run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
+    - name: Build DotNet
+      if: inputs.dotNetBuild == true
+      run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
+      working-directory: ${{ inputs.srcFolder }}
+
     - name: Create NuGet Artifacts
+      if: inputs.createArtifacts == true
       uses: actions/upload-artifact@master
       with:
         name: nuget
