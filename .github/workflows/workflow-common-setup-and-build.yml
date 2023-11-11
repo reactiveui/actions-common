@@ -75,6 +75,7 @@ jobs:
       shell: bash
       run: |
         dotnet tool update -g dotnet-vs
+        vs install preview Enterprise
         vs where preview
         vs update preview Enterprise
         vs modify preview Enterprise +mobile +desktop +uwp +web
