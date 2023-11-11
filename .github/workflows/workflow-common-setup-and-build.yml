@@ -71,13 +71,14 @@ jobs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:
     - name: Get Latest Visual Studio Version
+      if: inputs.useVisualStudioPreview == true
       shell: bash
       run: |
         dotnet tool update -g dotnet-vs
-        vs where release
-        vs update release Enterprise
-        vs modify release Enterprise +mobile +desktop +uwp +web
-        vs where release
+        vs where preview
+        vs update preview Enterprise
+        vs modify preview Enterprise +mobile +desktop +uwp +web
+        vs where preview
         
     - name: Checkout
       uses: actions/checkout@v4
@@ -85,12 +86,20 @@ jobs:
         fetch-depth: 0
         lfs: true
 
-    - name: Install .NET 6 & 7
+    - name: Setup .NET 6/7
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: |
-          6.0.x
-          7.0.x
+            6.0.x
+            7.0.x
+
+    - name: Setup .NET 8 preview
+      if: inputs.useVisualStudioPreview == true
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-quality: 'preview'
+        dotnet-version: |
+            8.0.x
 
     - name: Install DotNet workloads
       if: inputs.installWorkflows == true
