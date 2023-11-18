@@ -79,7 +79,9 @@ jobs:
         vs update release Enterprise
         vs modify release Enterprise +mobile +desktop +uwp +web
         vs where release
-        winget install Microsoft.OpenJDK.21
+
+    - name: Setup Java JDK
+      uses: actions/setup-java@v3.13.0            
         
     - name: Checkout
       uses: actions/checkout@v4
