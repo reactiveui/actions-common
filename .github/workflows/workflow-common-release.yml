@@ -75,18 +75,21 @@ jobs:
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:        
-    - name: Update Visual Studio Latest Release
+    - name: Get Latest Visual Studio Version
       if: inputs.useVisualStudioPreview == true
       shell: bash
       run: |
-        echo "## Update RELEASE ##"
         dotnet tool update -g dotnet-vs
         vs where release
         vs update release Enterprise
         vs modify release Enterprise +mobile +desktop +uwp +web
-        echo "## About RELEASE Updated ##"
         vs where release
-        echo "##vso[task.prependpath]$(vs where release --prop=InstallationPath)\MSBuild\Current\Bin"
+
+    - name: Setup Java JDK
+      uses: actions/setup-java@v3.13.0
+      with:
+        distribution: 'microsoft'
+        java-version: '11'
         
     - name: Checkout
       uses: actions/checkout@v4
