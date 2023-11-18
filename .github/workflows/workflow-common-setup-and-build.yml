@@ -79,6 +79,7 @@ jobs:
         vs update release Enterprise
         vs modify release Enterprise +mobile +desktop +uwp +web
         vs where release
+        winget install Microsoft.OpenJDK.21
         
     - name: Checkout
       uses: actions/checkout@v4
