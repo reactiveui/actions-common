@@ -91,6 +91,19 @@ jobs:
         distribution: 'microsoft'
         java-version: '11'
         
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install Android SDK
+      run: |
+        $sdkmanagerpath = Get-ChildItem "C:\Android\android-sdk\cmdline-tools\**\bin\sdkmanager.bat" | Select-Object -First 1
+        if ($sdkmanagerpath -eq $null) {
+            throw "Unable to find android sdk manager"
+        }
+
+        echo $sdkmanagerpath
+        . $sdkmanagerpath --install "platforms;android-30"
+
     - name: Checkout
       uses: actions/checkout@v4
       with:
