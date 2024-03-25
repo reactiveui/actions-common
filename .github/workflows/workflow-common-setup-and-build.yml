@@ -81,7 +81,7 @@ jobs:
         vs where release
 
     - name: Setup Java JDK
-      uses: actions/setup-java@v4.2.0
+      uses: actions/setup-java@v4.2.1
       with:
         distribution: 'microsoft'
         java-version: '11'
