@@ -4,8 +4,9 @@ on:
   workflow_call:
     inputs:
       configuration:
-        required: true
+        required: false
         type: string
+        default: 'Release'
         description: 'The build configuration. Eg debug/release'
 
       productNamespacePrefix:
@@ -14,12 +15,14 @@ on:
         description: 'The namespace prefix used to exclude unrelated items for code coverage'
 
       useVisualStudioPreview:
-        required: true
+        required: false
+        default: false
         type: boolean
         description: 'If the Visual Studio preview edition is used'
 
       useMauiCheckDotNetTool:
-        required: true
+        required: false
+        default: false
         type: boolean
         description: 'Use the Maui Check dotnet tool to make sure Maui is up to date'
 
