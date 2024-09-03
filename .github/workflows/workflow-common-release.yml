@@ -20,12 +20,6 @@ on:
         type: boolean
         description: 'If the Visual Studio preview edition is used'
 
-      useMauiCheckDotNetTool:
-        required: false
-        default: false
-        type: boolean
-        description: 'Use the Maui Check dotnet tool to make sure Maui is up to date'
-
       solutionFile:
         required: false
         type: string
@@ -55,11 +49,6 @@ on:
         type: boolean
         description: 'If installs Workflows'
 
-      dotNetBuild:
-        required: false
-        default: false
-        type: boolean
-        description: 'If to use a SDK build'
     secrets:
       SIGN_CLIENT_USER_ID:
         required: true
@@ -68,6 +57,12 @@ on:
       SIGN_CLIENT_CONFIG:
         required: true
       NUGET_API_KEY:
+        required: true
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
         required: true
 permissions:
   id-token: write
@@ -89,12 +84,6 @@ jobs:
         vs update release Enterprise
         vs modify release Enterprise +mobile +desktop +uwp +web
         vs where release
-
-    - name: Setup Java JDK
-      uses: actions/setup-java@v4.2.2
-      with:
-        distribution: 'microsoft'
-        java-version: '11'
         
     - name: Checkout
       uses: actions/checkout@v4
@@ -102,12 +91,11 @@ jobs:
         fetch-depth: 0
         lfs: true
 
-    - name: Setup .NET 6/7/8
+    - name: Setup .NET 6/8
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: |
             6.0.x
-            7.0.x
             8.0.x
 
     - name: Install DotNet workloads
@@ -115,20 +103,7 @@ jobs:
       shell: bash
       run: |
         dotnet workload install android ios tvos macos maui maccatalyst
-        
-    - name: Run Maui Installation Check
-      if: inputs.useMauiCheckDotNetTool == true
-      shell: bash
-      run: |
-        dotnet tool install -g Redth.Net.Maui.Check
-        maui-check --non-interactive --fix
-        
-    - name: Add MSBuild to PATH
-      if: inputs.dotNetBuild != true
-      uses: microsoft/setup-msbuild@v2.0.0
-      with:
-        vs-prerelease: true
-
+                
     - name: NBGV
       if: inputs.useNBGV == true
       id: nbgv
@@ -146,13 +121,7 @@ jobs:
       run: nuget restore ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
-    - name: Build MsBuild
-      if: inputs.dotNetBuild != true
-      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
-      working-directory: ${{ inputs.srcFolder }}
-
     - name: Build DotNet
-      if: inputs.dotNetBuild == true
       run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
@@ -177,19 +146,19 @@ jobs:
         name: nuget
         path: '**/*.nupkg'
         
-    - name: Changelog
-      uses: glennawatson/ChangeLog@v1
-      id: changelog
+    # - name: Changelog
+    #   uses: glennawatson/ChangeLog@v1
+    #   id: changelog
 
-    - name: Create Release
-      uses: actions/create-release@v1.1.4
-      env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-      with:
-          tag_name: ${{ steps.nbgv.outputs.SemVer2 }}
-          release_name: ${{ steps.nbgv.outputs.SemVer2 }}
-          body: |
-            ${{ steps.changelog.outputs.commitLog }}
+    # - name: Create Release
+    #   uses: actions/create-release@v1.1.4
+    #   env:
+    #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+    #   with:
+    #       tag_name: ${{ steps.nbgv.outputs.SemVer2 }}
+    #       release_name: ${{ steps.nbgv.outputs.SemVer2 }}
+    #       body: |
+    #         ${{ steps.changelog.outputs.commitLog }}
             
     # - name: NuGet Push
     #   env:
