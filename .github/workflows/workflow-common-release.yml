@@ -80,7 +80,15 @@ jobs:
         vs update release Enterprise
         vs modify release Enterprise +mobile +desktop +uwp +web
         vs where release
-        
+
+    - name: Azure login
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        enable-AzPSSession: true
+
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -120,12 +128,6 @@ jobs:
     - name: Build DotNet
       run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
-
-    - name: Azure login
-      uses: azure/login@v2
-      with:
-        creds: ${{ secrets.AZURE_CRED }}
-        enable-AzPSSession: true
 
     - name: Sign the NuGet Packages
       run: |
