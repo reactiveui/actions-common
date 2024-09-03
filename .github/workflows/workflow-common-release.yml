@@ -69,7 +69,9 @@ on:
         required: true
       NUGET_API_KEY:
         required: true
-
+permissions:
+  id-token: write
+  contents: read
 jobs:
   build-and-release:
     environment:
@@ -154,6 +156,20 @@ jobs:
       run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
+    - name: Azure login
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        enable-AzPSSession: true
+
+    - name: Sign the NuGet Packages
+      run: |
+        dotnet tool install --global AzureTrustedSignTool
+        dotnet tool install --global sign --prerelease
+        AzureTrustedSignTool sign --folder ./ --searchpattern *.nupkg --accountname ${{ secrets.SIGN_ACCOUNT_NAME }} --profilename ${{ secrets.SIGN_PROFILE_NAME }}
+
     - name: Create NuGet Artifacts
       if: inputs.createArtifacts == true
       uses: actions/upload-artifact@master
@@ -161,22 +177,6 @@ jobs:
         name: nuget
         path: '**/*.nupkg'
         
-    - name: Save SignClient Configuration
-      run: 'echo "$SIGN_CLIENT_CONFIG" > SignPackages.json'
-      shell: bash
-      env:
-        SIGN_CLIENT_CONFIG: ${{secrets.SIGN_CLIENT_CONFIG}}
-
-    - name: Sign NuGet Packages
-      uses: glennawatson/signclient@v1
-      with:
-        input-files: '**/*.nupkg'
-        sign-client-secret: ${{ secrets.SIGN_CLIENT_SECRET }}
-        sign-client-user: ${{ secrets.SIGN_CLIENT_USER_ID }}
-        project-name: reactiveui
-        description: reactiveui
-        config-file: SignPackages.json
-
     - name: Changelog
       uses: glennawatson/ChangeLog@v1
       id: changelog
