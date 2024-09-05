@@ -56,7 +56,11 @@ on:
         required: true
       NUGET_API_KEY:
         required: true
-      AZURE_CRED:
+      AZURE_CLIENT_SECRET:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_CLIENT_ID:
         required: true
 permissions:
   id-token: write
@@ -78,12 +82,6 @@ jobs:
         vs update release Enterprise
         vs modify release Enterprise +mobile +desktop +uwp +web
         vs where release
-
-    - name: Azure login
-      uses: azure/login@v2
-      with:
-        creds: ${{ secrets.AZURE_CRED }}
-        enable-AzPSSession: true
 
     - name: Checkout
       uses: actions/checkout@v4
@@ -125,13 +123,22 @@ jobs:
       run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
-    - name: Sign the NuGet Packages
-      run: |
-        dotnet tool install -g Knapcode.CertificateExtractor
-        dotnet tool install --global AzureTrustedSignTool
-        dotnet tool install --global sign --prerelease
-        AzureTrustedSignTool sign --folder ./ --searchpattern *.nupkg --accountname ${{ secrets.SIGN_ACCOUNT_NAME }} --profilename ${{ secrets.SIGN_PROFILE_NAME }}
-
+    - name: Sign files with Trusted Signing
+      uses: azure/trusted-signing-action@v0.4.0
+      with:
+        azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+        endpoint: https://eus.codesigning.azure.net/
+        trusted-signing-account-name: ${{ secrets.SIGN_ACCOUNT_NAME }}
+        certificate-profile-name: ${{ secrets.SIGN_PROFILE_NAME }}
+        files-folder: ${{ github.workspace }}
+        files-folder-filter: nupkg
+        files-folder-recurse: true
+        file-digest: SHA256
+        timestamp-rfc3161: http://timestamp.acs.microsoft.com
+        timestamp-digest: SHA256
+          
     - name: Create NuGet Artifacts
       if: inputs.createArtifacts == true
       uses: actions/upload-artifact@master
