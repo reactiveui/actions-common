@@ -50,11 +50,9 @@ on:
         description: 'If installs Workflows'
 
     secrets:
-      SIGN_CLIENT_USER_ID:
+      SIGN_ACCOUNT_NAME:
         required: true
-      SIGN_CLIENT_SECRET:
-        required: true
-      SIGN_CLIENT_CONFIG:
+      SIGN_PROFILE_NAME:
         required: true
       NUGET_API_KEY:
         required: true
