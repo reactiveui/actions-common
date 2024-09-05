@@ -127,6 +127,7 @@ jobs:
 
     - name: Sign the NuGet Packages
       run: |
+        dotnet tool install -g Knapcode.CertificateExtractor
         dotnet tool install --global AzureTrustedSignTool
         dotnet tool install --global sign --prerelease
         AzureTrustedSignTool sign --folder ./ --searchpattern *.nupkg --accountname ${{ secrets.SIGN_ACCOUNT_NAME }} --profilename ${{ secrets.SIGN_PROFILE_NAME }}
