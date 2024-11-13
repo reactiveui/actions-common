@@ -89,6 +89,7 @@ jobs:
         dotnet-version: |
             6.0.x
             8.0.x
+            9.0.x
 
     - name: Install DotNet workloads
       if: inputs.installWorkflows == true
