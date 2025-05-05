@@ -69,7 +69,7 @@ jobs:
   build-and-release:
     environment:
       name: release 
-    runs-on: windows-2022
+    runs-on: windows-2025
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:        
