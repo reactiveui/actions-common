@@ -55,6 +55,12 @@ on:
         type: boolean
         description: 'If installs Workflows'
 
+      useUNO:
+        required: false
+        default: false
+        type: boolean
+        description: 'If true installs UNO'
+
 jobs:
   build:
     runs-on: windows-2025
@@ -90,6 +96,14 @@ jobs:
             6.0.x
             8.0.x
             9.0.x
+
+    - name: Install Uno templates
+      if: inputs.useUNO == true
+      run: dotnet new install Uno.Templates
+
+    - name: Run uno-check
+      if: inputs.useUNO == true
+      run: dotnet tool install -g uno.check && uno-check
 
     - name: Install DotNet workloads
       if: inputs.installWorkflows == true
