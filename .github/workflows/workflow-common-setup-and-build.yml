@@ -67,48 +67,21 @@ jobs:
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:
-    - name: Get Latest Visual Studio Version
-      if: inputs.useVisualStudioPreview == true
-      shell: bash
-      run: |
-        dotnet tool update -g dotnet-vs
-        vs where release
-        vs update release Enterprise
-        vs modify release Enterprise +mobile +desktop +uwp +web
-        vs where release
+    #- name: Get Latest Visual Studio Version
+    #  if: inputs.useVisualStudioPreview == true
+    #  shell: bash
+    #  run: |
+    #    dotnet tool update -g dotnet-vs
+    #    vs where release
+    #    vs update release Enterprise
+    #    vs modify release Enterprise +mobile +desktop +uwp +web
+    #    vs where release
 
-    - name: Install Visual Studio Workloads and Windows SDK
-      if: inputs.useVisualStudioPreview == true
-      # This step assumes Visual Studio 2022 is installed on windows-latest.
-      # The exact component IDs might need to be fine-tuned based on your specific Uno Platform version and project needs.
-      run: |
-        $vsInstallerPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-        $vsInstallPath = & $vsInstallerPath -latest -products Microsoft.VisualStudio.Product.BuildTools -property installationPath # Or Microsoft.VisualStudio.Product.Community if that's what's on the runner
-
-        if (-not $vsInstallPath) {
-            Write-Error "Visual Studio Build Tools not found. Falling back to Community edition check."
-            $vsInstallPath = & $vsInstallerPath -latest -products Microsoft.VisualStudio.Product.Community -property installationPath
-            if (-not $vsInstallPath) {
-                Write-Error "Visual Studio Community not found. Unable to install workloads."
-                exit 1
-            }
-        }
-
-        Write-Host "Found Visual Studio at: $vsInstallPath"
-
-        Write-Host "Installing .NET Desktop Development workload..."
-        & "$vsInstallPath\Common7\Tools\vssetup.exe" modify "$vsInstallPath" --installPath "$vsInstallPath" --add Microsoft.VisualStudio.Workload.ManagedDesktop --passive --wait
-
-        Write-Host "Installing UWP Development workload..."
-        & "$vsInstallPath\Common7\Tools\vssetup.exe" modify "$vsInstallPath" --installPath "$vsInstallPath" --add Microsoft.VisualStudio.Workload.Universal --passive --wait
-
-        Write-Host "Installing Windows App SDK C# Templates..."
-        & "$vsInstallPath\Common7\Tools\vssetup.exe" modify "$vsInstallPath" --installPath "$vsInstallPath" --add Microsoft.VisualStudio.Component.WinAppSDK.CSharp --passive --wait
-
-        Write-Host "Ensuring Windows 10 SDK 10.0.19041.0 is installed..."
-        & "$vsInstallPath\Common7\Tools\vssetup.exe" modify "$vsInstallPath" --installPath "$vsInstallPath" --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --passive --wait
-
-        Write-Host "Workload installation complete."
+    - name: Install Windows 10 SDK 19041
+      if: inputs.useUNO == true
+      uses: GuillaumeFalourd/setup-windows10-sdk-action@v2.4
+      with:
+          sdk-version: 19041
 
     - name: Setup Java JDK
       uses: actions/setup-java@v4.7.1
