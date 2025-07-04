@@ -125,7 +125,7 @@ jobs:
       if: inputs.installWorkflows == true
       shell: bash
       run: |
-        dotnet workload install android ios tvos macos maui maccatalyst macos-net8
+        dotnet workload install android ios tvos macos maui maccatalyst
 
     - name: Restore DotNet workloads
       if: inputs.useUNO == true
