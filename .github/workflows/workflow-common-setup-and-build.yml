@@ -150,21 +150,19 @@ jobs:
       run: nuget restore ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
-    - name: Locate MSBuild
+    - name: Add MSBuild to PATH
       if: inputs.useUNO == true
-      id: msbuild
-      run: |
-        echo "##[set-output name=path;]$(vswhere -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe)"
-      shell: pwsh
+      uses: microsoft/setup-msbuild@v1.3.1
+      with:
+        vs-prerelease: true
 
-    - name: Build with MSBuild
+    - name: Build MsBuild
       if: inputs.useUNO == true
-      run: |
-        & "${{ steps.msbuild.outputs.path }}" ${{ inputs.solutionFile }} /t:Restore;Rebuild /p:Configuration=${{ inputs.configuration }} /p:Platform="Any CPU"
-      shell: pwsh
+      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
     - name: Build DotNet
+      if: inputs.useUNO == false
       run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
