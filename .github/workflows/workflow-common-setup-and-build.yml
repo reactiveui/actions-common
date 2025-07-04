@@ -77,12 +77,6 @@ jobs:
     #    vs modify release Enterprise +mobile +desktop +uwp +web
     #    vs where release
 
-    - name: Install Windows 10 SDK 19041
-      if: inputs.useUNO == true
-      uses: GuillaumeFalourd/setup-windows10-sdk-action@v2.4
-      with:
-          sdk-version: 19041
-
     - name: Setup Java JDK
       uses: actions/setup-java@v4.7.1
       with:
@@ -154,6 +148,20 @@ jobs:
 
     - name: NuGet Restore 
       run: nuget restore ${{ inputs.solutionFile }}
+      working-directory: ${{ inputs.srcFolder }}
+
+    - name: Locate MSBuild
+      if: inputs.useUNO == true
+      id: msbuild
+      run: |
+        echo "##[set-output name=path;]$(vswhere -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe)"
+      shell: pwsh
+
+    - name: Build with MSBuild
+      if: inputs.useUNO == true
+      run: |
+        & "${{ steps.msbuild.outputs.path }}" ${{ inputs.solutionFile }} /t:Restore;Rebuild /p:Configuration=${{ inputs.configuration }} /p:Platform="Any CPU"
+      shell: pwsh
       working-directory: ${{ inputs.srcFolder }}
 
     - name: Build DotNet
