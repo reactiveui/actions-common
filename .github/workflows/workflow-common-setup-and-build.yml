@@ -130,8 +130,8 @@ jobs:
     - name: Restore DotNet workloads
       if: inputs.useUNO == true
       shell: bash
-      run: |
-        dotnet workload restore 
+      run: dotnet workload restore --project ${{ inputs.solutionFile }}
+      working-directory: ${{ inputs.srcFolder }}
 
     - name: NBGV
       if: inputs.useNBGV == true
