@@ -105,6 +105,10 @@ jobs:
       if: inputs.useUNO == true
       run: dotnet tool install -g uno.check
 
+    - name: Restore dotnet tools
+      if: inputs.useUNO == true
+      run: dotnet tool restore
+
     - name: Run Uno Check to Install Dependencies
       if: inputs.useUNO == true
       run: >
