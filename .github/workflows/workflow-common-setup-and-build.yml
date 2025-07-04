@@ -167,6 +167,7 @@ jobs:
       working-directory: ${{ inputs.srcFolder }}
 
     - name: Pack DotNet
+      if: inputs.useUNO == false
       run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
       
