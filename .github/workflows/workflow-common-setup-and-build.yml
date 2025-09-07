@@ -60,12 +60,6 @@ on:
         default: false
         description: 'If true, run workload restore (all OSes)'
 
-      # Install Tizen workload via Samsung script (Windows/macOS only).
-      installTizenWorkload:
-        type: boolean
-        default: true
-        description: 'If true, install Tizen workload (Windows/macOS) using Samsung script'
-
       useUNO:
         type: boolean
         default: false
@@ -169,19 +163,6 @@ jobs:
           vs update release Enterprise
           vs modify release Enterprise +mobile +desktop +uwp +web
           vs where release
-
-      # Install Tizen via Samsung script, pinned to the current SDK band (avoids MSI fetch).
-      - name: Install Tizen workload (Windows)
-        if: inputs.installTizenWorkload == true
-        shell: pwsh
-        run: |
-          $dotver = & dotnet --version
-          $p = $dotver.Split('.')
-          $band = "$($p[0]).$($p[1]).$($p[2][0])00"
-          Write-Host "Installing Tizen workload for SDK band $band"
-          Invoke-WebRequest https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.ps1 -OutFile install-tizen.ps1
-          # Let the script choose the right version for the band; no MSI path.
-          .\install-tizen.ps1 -t $band
 
       # Only restore workloads when explicitly enabled, and never update manifests.
       - name: Restore .NET Workloads
@@ -372,20 +353,6 @@ jobs:
           key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
           restore-keys: |
             ${{ runner.os }}-nugetv3-
-
-      # Install Tizen via Samsung script (macOS), pinned to current SDK band.
-      - name: Install Tizen workload (macOS)
-        if: inputs.installTizenWorkload == true
-        shell: bash
-        run: |
-          DOTVER="$(dotnet --version)"
-          IFS='.' read -r MA MI PA <<< "$DOTVER"
-          BAND="${MA}.${MI}.${PA:0:1}00"
-          echo "Installing Tizen workload for SDK band ${BAND}"
-          curl -sSL https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.sh -o install-tizen.sh
-          chmod +x install-tizen.sh
-          # Script installs manifest/packs directly; avoid MSI path.
-          sudo bash ./install-tizen.sh -t "${BAND}"
 
       # Workload restore only when enabled; use sudo to avoid permissions error; never update manifests.
       - name: Restore .NET Workloads
