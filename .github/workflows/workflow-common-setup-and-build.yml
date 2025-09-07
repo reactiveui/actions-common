@@ -54,17 +54,6 @@ on:
         default: true
         description: 'Upload NuGet packages from Windows job'
 
-      installWorkloads:
-        type: boolean
-        default: false
-        description: 'Install .NET mobile/mac workloads on Windows'
-
-      # NEW: parameterize workloads (default matches current behavior)
-      workloadsToInstall:
-        type: string
-        default: 'android ios tvos macos maui maccatalyst'
-        description: '.NET workloads to install when installWorkloads=true (space-separated)'
-
       useUNO:
         type: boolean
         default: false
@@ -167,18 +156,16 @@ jobs:
           vs modify release Enterprise +mobile +desktop +uwp +web
           vs where release
 
-      - name: Install .NET Workloads (optional)
-        if: inputs.installWorkloads == true
+      # Simplified: rely on workload restore only
+      - name: Restore .NET Workloads
         shell: bash
-        run: |
-          dotnet workload install ${{ inputs.workloadsToInstall }}
-          dotnet workload restore
-
-      - name: Restore .NET Workloads (UNO)
-        if: inputs.useUNO == true
-        shell: bash
-        run: dotnet workload restore --project ${{ inputs.solutionFile }}
         working-directory: ${{ inputs.srcFolder }}
+        run: |
+          if [ -n "${{ inputs.solutionFile }}" ]; then
+            dotnet workload restore --project "${{ inputs.solutionFile }}"
+          else
+            dotnet workload restore
+          fi
 
       - name: NBGV
         if: inputs.useNBGV == true
@@ -281,12 +268,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      - name: Install .NET Workloads (optional)
-        if: inputs.installWorkloads == true
+      # Simplified: rely on workload restore only
+      - name: Restore .NET Workloads
         shell: bash
+        working-directory: ${{ inputs.srcFolder }}
         run: |
-          dotnet workload install ${{ inputs.workloadsToInstall }}
-          dotnet workload restore
+          if [ -n "${{ inputs.solutionFile }}" ]; then
+            dotnet workload restore --project "${{ inputs.solutionFile }}"
+          else
+            dotnet workload restore
+          fi
 
       - name: Restore
         run: dotnet restore ${{ inputs.solutionFile }}
@@ -349,12 +340,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      - name: Install .NET Workloads (optional)
-        if: inputs.installWorkloads == true
+      # Simplified: rely on workload restore only
+      - name: Restore .NET Workloads
         shell: bash
+        working-directory: ${{ inputs.srcFolder }}
         run: |
-          dotnet workload install ${{ inputs.workloadsToInstall }}
-          dotnet workload restore
+          if [ -n "${{ inputs.solutionFile }}" ]; then
+            dotnet workload restore --project "${{ inputs.solutionFile }}"
+          else
+            dotnet workload restore
+          fi
 
       - name: Restore
         run: dotnet restore ${{ inputs.solutionFile }}
@@ -431,6 +426,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.mergedCoverageArtifactName }}
+        # include raw xmls from each OS + merged HTML if present
           path: |
             ./.collect/**/coverage.opencover.xml
             ./.collect/**/coverage.cobertura.xml
