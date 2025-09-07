@@ -59,6 +59,12 @@ on:
         default: false
         description: 'Install .NET mobile/mac workloads on Windows'
 
+      # NEW: parameterize workloads (default matches current behavior)
+      workloadsToInstall:
+        type: string
+        default: 'android ios tvos macos maui maccatalyst'
+        description: '.NET workloads to install when installWorkloads=true (space-separated)'
+
       useUNO:
         type: boolean
         default: false
@@ -165,7 +171,8 @@ jobs:
         if: inputs.installWorkloads == true
         shell: bash
         run: |
-          dotnet workload install android ios tvos macos maui maccatalyst
+          dotnet workload install ${{ inputs.workloadsToInstall }}
+          dotnet workload restore
 
       - name: Restore .NET Workloads (UNO)
         if: inputs.useUNO == true
@@ -274,6 +281,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
+      - name: Install .NET Workloads (optional)
+        if: inputs.installWorkloads == true
+        shell: bash
+        run: |
+          dotnet workload install ${{ inputs.workloadsToInstall }}
+          dotnet workload restore
+
       - name: Restore
         run: dotnet restore ${{ inputs.solutionFile }}
         working-directory: ${{ inputs.srcFolder }}
@@ -334,6 +348,13 @@ jobs:
           key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
           restore-keys: |
             ${{ runner.os }}-nugetv3-
+
+      - name: Install .NET Workloads (optional)
+        if: inputs.installWorkloads == true
+        shell: bash
+        run: |
+          dotnet workload install ${{ inputs.workloadsToInstall }}
+          dotnet workload restore
 
       - name: Restore
         run: dotnet restore ${{ inputs.solutionFile }}
