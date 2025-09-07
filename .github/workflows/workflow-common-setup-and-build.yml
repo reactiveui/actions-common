@@ -54,7 +54,6 @@ on:
         default: true
         description: 'Upload NuGet packages from Windows job'
 
-      # If true, run `dotnet workload restore` (with --skip-manifest-update) on each OS.
       installWorkloads:
         type: boolean
         default: false
@@ -72,23 +71,13 @@ on:
 
       coverageFormats:
         type: string
-        default: 'opencover,cobertura'
+        default: 'cobertura'
         description: 'Coverlet formats to output'
-
-      coverageReportTypes:
-        type: string
-        default: 'HtmlInline_AzurePipelines;MarkdownSummary_GitHub'
-        description: 'ReportGenerator report types (used for merged report)'
 
       mergedCoverageArtifactName:
         type: string
         default: 'coverage-all'
-        description: 'Name of the single final artifact with all coverage'
-
-      mergeCoverage:
-        type: boolean
-        default: true
-        description: 'Merge Cobertura reports from all OSes into one HTML+summary'
+        description: 'Name of the artifact with all raw coverage reports'
 
       cleanupPerOsArtifacts:
         type: boolean
@@ -164,7 +153,6 @@ jobs:
           vs modify release Enterprise +mobile +desktop +uwp +web
           vs where release
 
-      # Only restore workloads when explicitly enabled, and never update manifests.
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
         shell: bash
@@ -214,7 +202,6 @@ jobs:
         run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
         working-directory: ${{ inputs.srcFolder }}
 
-      # ---- Tests + Coverage
       - name: Tests + Coverage (Windows)
         if: inputs.performTests == true
         uses: glennawatson/coverlet-msbuild@v2.1
@@ -226,15 +213,12 @@ jobs:
           output-format: '"${{ inputs.coverageFormats }}"'
           configuration: ${{ inputs.configuration }}
 
-      # temp artifact used only for the collector job
       - name: Upload per-OS coverage (Windows → temp)
         if: inputs.performTests == true
         uses: actions/upload-artifact@v4
         with:
           name: tmp-coverage-windows
-          path: |
-            ${{ inputs.srcFolder }}/**/coverage.opencover.xml
-            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          path: ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
@@ -279,7 +263,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      # Workload restore only when enabled (no Tizen on Linux)
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
         shell: bash
@@ -315,9 +298,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tmp-coverage-linux
-          path: |
-            ${{ inputs.srcFolder }}/**/coverage.opencover.xml
-            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          path: ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
@@ -354,7 +335,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      # Workload restore only when enabled; use sudo to avoid permissions error; never update manifests.
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
         shell: bash
@@ -390,9 +370,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tmp-coverage-macos
-          path: |
-            ${{ inputs.srcFolder }}/**/coverage.opencover.xml
-            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          path: ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
@@ -417,34 +395,12 @@ jobs:
         with:
           pattern: tmp-coverage-*
           path: ./.collect
-          merge-multiple: true
 
-      - name: Install ReportGenerator (for merged report)
-        if: inputs.mergeCoverage == true
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
-
-      - name: Merge & Generate HTML + Summary
-        if: inputs.mergeCoverage == true
-        shell: bash
-        run: |
-          mkdir -p ./.artifacts/coverage-merged
-          reportgenerator \
-            -reports:"./.collect/**/coverage.cobertura.xml" \
-            -targetdir:"./.artifacts/coverage-merged" \
-            -reporttypes:"${{ inputs.coverageReportTypes }}"
-          if [ -f "./.artifacts/coverage-merged/SummaryGithub.md" ]; then
-            echo "## Combined Coverage" >> "$GITHUB_STEP_SUMMARY"
-            cat "./.artifacts/coverage-merged/SummaryGithub.md" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Upload single consolidated artifact
+      - name: Upload raw coverage reports (for debugging)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.mergedCoverageArtifactName }}
-          path: |
-            ./.collect/**/coverage.opencover.xml
-            ./.collect/**/coverage.cobertura.xml
-            ./.artifacts/coverage-merged/**
+          path: ./.collect/**/coverage.cobertura.xml
           if-no-files-found: warn
           retention-days: 30
 
@@ -453,15 +409,12 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: |
-            ./.collect/**/coverage.cobertura.xml
-            ./.collect/**/coverage.opencover.xml
+          files: ./.collect/**/coverage.cobertura.xml
           flags: ${{ inputs.codecovFlags }}
           name: ${{ inputs.codecovName }}
           disable_search: true
           fail_ci_if_error: true
 
-      # Optional: delete temp per-OS artifacts so only the consolidated one remains
       - name: Cleanup per-OS temp artifacts
         if: inputs.cleanupPerOsArtifacts == true
         env:
