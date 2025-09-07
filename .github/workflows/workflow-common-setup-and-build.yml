@@ -54,17 +54,17 @@ on:
         default: true
         description: 'Upload NuGet packages from Windows job'
 
-      # Gate whether we do any `dotnet workload restore` (all OSes).
+      # If true, run `dotnet workload restore` (with --skip-manifest-update) on each OS.
       installWorkloads:
         type: boolean
         default: false
-        description: 'If true, run `dotnet workload restore` (all OSes)'
+        description: 'If true, run workload restore (all OSes)'
 
-      # Install Tizen workload specifically (Windows/macOS only).
+      # Install Tizen workload via Samsung script (Windows/macOS only).
       installTizenWorkload:
         type: boolean
         default: true
-        description: 'If true, install Tizen SDK via Samsung scripts on Windows/macOS'
+        description: 'If true, install Tizen workload (Windows/macOS) using Samsung script'
 
       useUNO:
         type: boolean
@@ -79,7 +79,7 @@ on:
       coverageFormats:
         type: string
         default: 'opencover,cobertura'
-        description: 'Coverlet formats to output (comma-separated)'
+        description: 'Coverlet formats to output'
 
       coverageReportTypes:
         type: string
@@ -128,6 +128,8 @@ jobs:
   # ============================
   build-windows:
     runs-on: windows-latest
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:
@@ -168,24 +170,29 @@ jobs:
           vs modify release Enterprise +mobile +desktop +uwp +web
           vs where release
 
-      # Install Tizen SDK only if requested (Windows) - uses Samsung script
+      # Install Tizen via Samsung script, pinned to the current SDK band (avoids MSI fetch).
       - name: Install Tizen workload (Windows)
         if: inputs.installTizenWorkload == true
         shell: pwsh
         run: |
+          $dotver = & dotnet --version
+          $p = $dotver.Split('.')
+          $band = "$($p[0]).$($p[1]).$($p[2][0])00"
+          Write-Host "Installing Tizen workload for SDK band $band"
           Invoke-WebRequest https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.ps1 -OutFile install-tizen.ps1
-          .\install-tizen.ps1
+          # Let the script choose the right version for the band; no MSI path.
+          .\install-tizen.ps1 -t $band
 
-      # Run workload restore only when explicitly enabled
+      # Only restore workloads when explicitly enabled, and never update manifests.
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
           if [ -n "${{ inputs.solutionFile }}" ]; then
-            dotnet workload restore --project "${{ inputs.solutionFile }}"
+            dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
           else
-            dotnet workload restore
+            dotnet workload restore --skip-manifest-update
           fi
 
       - name: NBGV
@@ -263,6 +270,8 @@ jobs:
   # ============================
   build-linux:
     runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -289,16 +298,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      # Workload restore only when enabled
+      # Workload restore only when enabled (no Tizen on Linux)
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
           if [ -n "${{ inputs.solutionFile }}" ]; then
-            dotnet workload restore --project "${{ inputs.solutionFile }}"
+            dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
           else
-            dotnet workload restore
+            dotnet workload restore --skip-manifest-update
           fi
 
       - name: Restore
@@ -336,6 +345,8 @@ jobs:
   # ============================
   build-macos:
     runs-on: macos-latest
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -362,23 +373,30 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      # Install Tizen SDK only if requested (macOS) - uses Samsung script
+      # Install Tizen via Samsung script (macOS), pinned to current SDK band.
       - name: Install Tizen workload (macOS)
         if: inputs.installTizenWorkload == true
         shell: bash
         run: |
-          curl -sSL https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.sh | sudo bash
+          DOTVER="$(dotnet --version)"
+          IFS='.' read -r MA MI PA <<< "$DOTVER"
+          BAND="${MA}.${MI}.${PA:0:1}00"
+          echo "Installing Tizen workload for SDK band ${BAND}"
+          curl -sSL https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.sh -o install-tizen.sh
+          chmod +x install-tizen.sh
+          # Script installs manifest/packs directly; avoid MSI path.
+          sudo bash ./install-tizen.sh -t "${BAND}"
 
-      # Workload restore only when enabled
+      # Workload restore only when enabled; use sudo to avoid permissions error; never update manifests.
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
           if [ -n "${{ inputs.solutionFile }}" ]; then
-            dotnet workload restore --project "${{ inputs.solutionFile }}"
+            sudo dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
           else
-            dotnet workload restore
+            sudo dotnet workload restore --skip-manifest-update
           fi
 
       - name: Restore
@@ -422,6 +440,11 @@ jobs:
     if: inputs.performTests == true
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (for PR summary context)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
       - name: Download temp coverage artifacts
         uses: actions/download-artifact@v4
         with:
