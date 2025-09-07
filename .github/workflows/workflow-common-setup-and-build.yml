@@ -182,12 +182,6 @@ jobs:
         output-format: cobertura
         configuration: ${{ inputs.configuration }}
 
-    - name: Upload Code Coverage
-      uses: codecov/codecov-action@v5
-      if: inputs.performTests == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
-      with: 
-        token: ${{ secrets.CODECOV_TOKEN }}
-        
     - name: Create NuGet Artifacts
       if: inputs.createArtifacts == true
       uses: actions/upload-artifact@master
