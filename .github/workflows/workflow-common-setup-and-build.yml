@@ -54,7 +54,7 @@ on:
         default: true
         description: 'Upload NuGet packages from Windows job'
 
-      # Gate whether we do any dotnet workload restore at all (all OSes).
+      # Gate whether we do any `dotnet workload restore` (all OSes).
       installWorkloads:
         type: boolean
         default: false
@@ -64,7 +64,7 @@ on:
       installTizenWorkload:
         type: boolean
         default: true
-        description: 'If true, run `dotnet workload install tizen` on Windows and macOS'
+        description: 'If true, install Tizen SDK via Samsung scripts on Windows/macOS'
 
       useUNO:
         type: boolean
@@ -168,11 +168,13 @@ jobs:
           vs modify release Enterprise +mobile +desktop +uwp +web
           vs where release
 
-      # Install Tizen SDK only if requested (Windows)
+      # Install Tizen SDK only if requested (Windows) - uses Samsung script
       - name: Install Tizen workload (Windows)
         if: inputs.installTizenWorkload == true
-        shell: bash
-        run: dotnet workload install tizen
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.ps1 -OutFile install-tizen.ps1
+          .\install-tizen.ps1
 
       # Run workload restore only when explicitly enabled
       - name: Restore .NET Workloads
@@ -360,11 +362,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      # Install Tizen SDK only if requested (macOS)
+      # Install Tizen SDK only if requested (macOS) - uses Samsung script
       - name: Install Tizen workload (macOS)
         if: inputs.installTizenWorkload == true
         shell: bash
-        run: dotnet workload install tizen
+        run: |
+          curl -sSL https://raw.githubusercontent.com/Samsung/Tizen.NET/main/workload/scripts/workload-install.sh | sudo bash
 
       # Workload restore only when enabled
       - name: Restore .NET Workloads
