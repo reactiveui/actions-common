@@ -54,11 +54,17 @@ on:
         default: true
         description: 'Upload NuGet packages from Windows job'
 
-      # Back-compat: deprecated/no-op. Keep for callers that still pass it.
+      # Gate whether we do any dotnet workload restore at all (all OSes).
       installWorkloads:
         type: boolean
         default: false
-        description: '(DEPRECATED) Ignored. Workloads are restored via dotnet workload restore only.'
+        description: 'If true, run `dotnet workload restore` (all OSes)'
+
+      # Install Tizen workload specifically (Windows/macOS only).
+      installTizenWorkload:
+        type: boolean
+        default: true
+        description: 'If true, run `dotnet workload install tizen` on Windows and macOS'
 
       useUNO:
         type: boolean
@@ -73,7 +79,7 @@ on:
       coverageFormats:
         type: string
         default: 'opencover,cobertura'
-        description: 'Coverlet formats to output'
+        description: 'Coverlet formats to output (comma-separated)'
 
       coverageReportTypes:
         type: string
@@ -162,8 +168,15 @@ jobs:
           vs modify release Enterprise +mobile +desktop +uwp +web
           vs where release
 
-      # Simplified: rely on workload restore only
+      # Install Tizen SDK only if requested (Windows)
+      - name: Install Tizen workload (Windows)
+        if: inputs.installTizenWorkload == true
+        shell: bash
+        run: dotnet workload install tizen
+
+      # Run workload restore only when explicitly enabled
       - name: Restore .NET Workloads
+        if: inputs.installWorkloads == true
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
@@ -220,7 +233,7 @@ jobs:
           no-build: true
           exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
           include-filter: '[${{inputs.productNamespacePrefix}}*]*'
-          output-format: ${{ inputs.coverageFormats }}
+          output-format: '"${{ inputs.coverageFormats }}"'
           configuration: ${{ inputs.configuration }}
 
       # temp artifact used only for the collector job
@@ -274,8 +287,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      # Simplified: rely on workload restore only
+      # Workload restore only when enabled
       - name: Restore .NET Workloads
+        if: inputs.installWorkloads == true
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
@@ -301,7 +315,7 @@ jobs:
           no-build: true
           exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
           include-filter: '[${{inputs.productNamespacePrefix}}*]*'
-          output-format: ${{ inputs.coverageFormats }}
+          output-format: '"${{ inputs.coverageFormats }}"'
           configuration: ${{ inputs.configuration }}
 
       - name: Upload per-OS coverage (Linux → temp)
@@ -346,8 +360,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      # Simplified: rely on workload restore only
+      # Install Tizen SDK only if requested (macOS)
+      - name: Install Tizen workload (macOS)
+        if: inputs.installTizenWorkload == true
+        shell: bash
+        run: dotnet workload install tizen
+
+      # Workload restore only when enabled
       - name: Restore .NET Workloads
+        if: inputs.installWorkloads == true
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
@@ -373,7 +394,7 @@ jobs:
           no-build: true
           exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
           include-filter: '[${{inputs.productNamespacePrefix}}*]*'
-          output-format: ${{ inputs.coverageFormats }}
+          output-format: '"${{ inputs.coverageFormats }}"'
           configuration: ${{ inputs.configuration }}
 
       - name: Upload per-OS coverage (macOS → temp)
@@ -398,11 +419,6 @@ jobs:
     if: inputs.performTests == true
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (for PR summary context)
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
       - name: Download temp coverage artifacts
         uses: actions/download-artifact@v4
         with:
