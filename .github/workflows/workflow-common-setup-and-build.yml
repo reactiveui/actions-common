@@ -1,190 +1,449 @@
+# .github/workflows/common-dotnet-build.yml
 name: Common .NET setup and build workflow
+
+permissions:
+  contents: read
+  actions: write   # needed for the optional cleanup step at the end
 
 on:
   workflow_call:
     inputs:
       configuration:
-        required: false
         type: string
         default: 'Release'
-        description: 'The build configuration. Eg debug/release'
+        description: 'Build configuration'
+
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+        description: 'Newline-separated list of .NET SDKs'
 
       productNamespacePrefix:
-        required: true
         type: string
-        description: 'The namespace prefix used to exclude unrelated items for code coverage'
+        required: true
+        description: 'Namespace prefix for coverage include/exclude filters'
 
       useVisualStudioPreview:
-        required: false
-        default: false
         type: boolean
-        description: 'If the Visual Studio preview edition is used'
+        default: false
+        description: 'Use VS preview on Windows (for UNO/mobile scenarios)'
 
       solutionFile:
-        required: false
         type: string
-        description: 'Optional name of a solution file founded in the srcFolder'
+        description: 'Solution file relative to srcFolder'
         
       srcFolder:
-        required: false
         type: string
         default: 'src'
-        description: 'The folder where the source can be found'
-        
+        description: 'Folder containing the solution'
+
       performTests:
-        required: false
-        default: true
         type: boolean
-        description: 'If tests need to be conducted'
-        
+        default: true
+        description: 'Run tests + collect coverage on each OS'
+
       useNBGV:
-        required: false
-        default: true
         type: boolean
-        description: 'If uses NBGV'
+        default: true
+        description: 'Run NBGV to stamp version variables'
         
       createArtifacts:
-        required: false
-        default: true
         type: boolean
-        description: 'If creates Artifacts'
+        default: true
+        description: 'Upload NuGet packages from Windows job'
 
-      installWorkflows:
-        required: false
-        default: true
+      installWorkloads:
         type: boolean
-        description: 'If installs Workflows'
+        default: false
+        description: 'Install .NET mobile/mac workloads on Windows'
 
       useUNO:
-        required: false
-        default: false
         type: boolean
-        description: 'If true installs UNO'
+        default: false
+        description: 'Enable UNO-specific steps on Windows (msbuild/pack flow)'
+
+      testsProjectGlob:
+        type: string
+        default: '**/*Tests*.csproj'
+        description: 'Glob for test csproj files, relative to srcFolder'
+
+      coverageFormats:
+        type: string
+        default: 'opencover,cobertura'
+        description: 'Coverlet formats to output'
+
+      coverageReportTypes:
+        type: string
+        default: 'HtmlInline_AzurePipelines;MarkdownSummary_GitHub'
+        description: 'ReportGenerator report types (used for merged report)'
+
+      mergedCoverageArtifactName:
+        type: string
+        default: 'coverage-all'
+        description: 'Name of the single final artifact with all coverage'
+
+      mergeCoverage:
+        type: boolean
+        default: true
+        description: 'Merge Cobertura reports from all OSes into one HTML+summary'
+
+      cleanupPerOsArtifacts:
+        type: boolean
+        default: true
+        description: 'Delete the temporary per-OS artifacts after final upload'
+
+      uploadCodecov:
+        type: boolean
+        default: true
+        description: 'Upload coverage to Codecov in the collector job'
+
+      codecovFlags:
+        type: string
+        default: ''
+        description: 'Optional Codecov flags (comma-separated) for the upload'
+
+      codecovName:
+        type: string
+        default: 'combined'
+        description: 'Optional Codecov upload name'
+
+    secrets:
+      NuGetAPIKey:
+        required: false
+      CODECOV_TOKEN:
+        required: true
 
 jobs:
-  build:
+  # ============================
+  # WINDOWS (parallel)
+  # ============================
+  build-windows:
     runs-on: windows-latest
     outputs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:
-    - name: Get Latest Visual Studio Version
-      if: inputs.useVisualStudioPreview == true
-      shell: bash
-      run: |
-        dotnet tool update -g dotnet-vs
-        vs where release
-        vs update release Enterprise
-        vs modify release Enterprise +mobile +desktop +uwp +web
-        vs where release
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          lfs: true
 
-    - name: Setup Java JDK
-      uses: actions/setup-java@v5.0.0
-      with:
-        distribution: 'microsoft'
-        java-version: '21'
-        
-    - name: Checkout
-      uses: actions/checkout@v5
-      with:
-        fetch-depth: 0
-        lfs: true
+      - name: Setup .NET (with NuGet cache)
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnetVersions }}
+          cache: true
+          cache-dependency-path: |
+            **/Directory.Packages.props
+            **/*.sln
+            **/*.csproj
+            **/global.json
+            **/nuget.config
 
-    - name: Setup .NET 6/8/9
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: |
-            6.0.x
-            8.0.x
-            9.0.x
+      - name: Cache NuGet HTTP (v3)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\NuGet\v3-cache
+          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nugetv3-
 
-    - name: Install Uno templates
-      if: inputs.useUNO == true
-      run: dotnet new install Uno.Templates
+      - name: Get Latest Visual Studio Version
+        if: inputs.useVisualStudioPreview == true
+        shell: bash
+        run: |
+          dotnet tool update -g dotnet-vs
+          vs where release
+          vs update release Enterprise
+          vs modify release Enterprise +mobile +desktop +uwp +web
+          vs where release
 
-    - name: Install uno-check
-      if: inputs.useUNO == true
-      run: dotnet tool install -g uno.check
+      - name: Install .NET Workloads (optional)
+        if: inputs.installWorkloads == true
+        shell: bash
+        run: |
+          dotnet workload install android ios tvos macos maui maccatalyst
 
-    - name: Restore dotnet tools
-      if: inputs.useUNO == true
-      run: dotnet tool restore
+      - name: Restore .NET Workloads (UNO)
+        if: inputs.useUNO == true
+        shell: bash
+        run: dotnet workload restore --project ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
 
-    - name: Run Uno Check to Install Dependencies
-      if: inputs.useUNO == true
-      run: >
-          dotnet tool run uno-check 
-          --ci
-          --fix
-          --non-interactive
-          --skip wsl
-          --skip androidemulator
-          --skip vswinworkloads
-          --verbose
+      - name: NBGV
+        if: inputs.useNBGV == true
+        id: nbgv
+        uses: dotnet/nbgv@master
+        with:
+          setAllVars: true
 
-    - name: Install DotNet workloads
-      if: inputs.installWorkflows == true
-      shell: bash
-      run: |
-        dotnet workload install android ios tvos macos maui maccatalyst
+      - name: Install NuGet (CLI)
+        uses: nuget/setup-nuget@v2
+        with:
+          nuget-api-key: ${{ secrets.NuGetAPIKey }}
+          nuget-version: '6.x'
 
-    - name: Restore DotNet workloads
-      if: inputs.useUNO == true
-      shell: bash
-      run: dotnet workload restore --project ${{ inputs.solutionFile }}
-      working-directory: ${{ inputs.srcFolder }}
+      - name: NuGet Restore
+        run: nuget restore ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
 
-    - name: NBGV
-      if: inputs.useNBGV == true
-      id: nbgv
-      uses: dotnet/nbgv@master
-      with:
-        setAllVars: true
+      - name: Add MSBuild to PATH (UNO)
+        if: inputs.useUNO == true
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-prerelease: true
 
-    - name: Install NuGet 
-      uses: nuget/setup-nuget@v2
-      with:
-        nuget-api-key: ${{ secrets.NuGetAPIKey }}
-        nuget-version: '6.x'
+      - name: Build (msbuild)
+        if: inputs.useUNO == true
+        run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
 
-    - name: NuGet Restore 
-      run: nuget restore ${{ inputs.solutionFile }}
-      working-directory: ${{ inputs.srcFolder }}
+      - name: Build (dotnet)
+        if: inputs.useUNO == false
+        run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
 
-    - name: Add MSBuild to PATH
-      if: inputs.useUNO == true
-      uses: microsoft/setup-msbuild@v2.0.0
-      with:
-        vs-prerelease: true
+      - name: Pack (dotnet)
+        if: inputs.useUNO == false
+        run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
 
-    - name: Build MsBuild
-      if: inputs.useUNO == true
-      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
-      working-directory: ${{ inputs.srcFolder }}
+      # ---- Tests + Coverage
+      - name: Tests + Coverage (Windows)
+        if: inputs.performTests == true
+        uses: glennawatson/coverlet-msbuild@v2.1
+        with:
+          project-files: '${{ inputs.srcFolder }}/${{ inputs.testsProjectGlob }}'
+          no-build: true
+          exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
+          include-filter: '[${{inputs.productNamespacePrefix}}*]*'
+          output-format: ${{ inputs.coverageFormats }}
+          configuration: ${{ inputs.configuration }}
 
-    - name: Build DotNet
-      if: inputs.useUNO == false
-      run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
-      working-directory: ${{ inputs.srcFolder }}
+      # temp artifact used only for the collector job
+      - name: Upload per-OS coverage (Windows → temp)
+        if: inputs.performTests == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmp-coverage-windows
+          path: |
+            ${{ inputs.srcFolder }}/**/coverage.opencover.xml
+            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          if-no-files-found: warn
+          retention-days: 3
 
-    - name: Pack DotNet
-      if: inputs.useUNO == false
-      run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
-      working-directory: ${{ inputs.srcFolder }}
-      
-    - name: Run Unit Tests and Generate Coverage
-      uses: glennawatson/coverlet-msbuild@v2.1
-      if: inputs.performTests == true
-      with:
-        project-files: '${{ inputs.srcFolder }}/**/*Tests*.csproj'
-        no-build: true
-        exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
-        include-filter: '[${{inputs.productNamespacePrefix}}*]*'
-        output-format: cobertura
-        configuration: ${{ inputs.configuration }}
+      - name: Upload NuGet Packages
+        if: inputs.createArtifacts == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget
+          path: '**/*.nupkg'
+          if-no-files-found: warn
 
-    - name: Create NuGet Artifacts
-      if: inputs.createArtifacts == true
-      uses: actions/upload-artifact@master
-      with:
-        name: nuget
-        path: '**/*.nupkg'
+  # ============================
+  # LINUX (parallel)
+  # ============================
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET (with NuGet cache)
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnetVersions }}
+          cache: true
+          cache-dependency-path: |
+            **/Directory.Packages.props
+            **/*.sln
+            **/*.csproj
+            **/global.json
+            **/nuget.config
+
+      - name: Cache NuGet HTTP (v3)
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/NuGet/v3-cache
+          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nugetv3-
+
+      - name: Restore
+        run: dotnet restore ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
+
+      - name: Build
+        run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
+
+      - name: Tests + Coverage (Linux)
+        if: inputs.performTests == true
+        uses: glennawatson/coverlet-msbuild@v2.1
+        with:
+          project-files: '${{ inputs.srcFolder }}/${{ inputs.testsProjectGlob }}'
+          no-build: true
+          exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
+          include-filter: '[${{inputs.productNamespacePrefix}}*]*'
+          output-format: ${{ inputs.coverageFormats }}
+          configuration: ${{ inputs.configuration }}
+
+      - name: Upload per-OS coverage (Linux → temp)
+        if: inputs.performTests == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmp-coverage-linux
+          path: |
+            ${{ inputs.srcFolder }}/**/coverage.opencover.xml
+            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          if-no-files-found: warn
+          retention-days: 3
+
+  # ============================
+  # macOS (parallel)
+  # ============================
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET (with NuGet cache)
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ inputs.dotnetVersions }}
+          cache: true
+          cache-dependency-path: |
+            **/Directory.Packages.props
+            **/*.sln
+            **/*.csproj
+            **/global.json
+            **/nuget.config
+
+      - name: Cache NuGet HTTP (v3)
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/NuGet/v3-cache
+          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nugetv3-
+
+      - name: Restore
+        run: dotnet restore ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
+
+      - name: Build
+        run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
+        working-directory: ${{ inputs.srcFolder }}
+
+      - name: Tests + Coverage (macOS)
+        if: inputs.performTests == true
+        uses: glennawatson/coverlet-msbuild@v2.1
+        with:
+          project-files: '${{ inputs.srcFolder }}/${{ inputs.testsProjectGlob }}'
+          no-build: true
+          exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
+          include-filter: '[${{inputs.productNamespacePrefix}}*]*'
+          output-format: ${{ inputs.coverageFormats }}
+          configuration: ${{ inputs.configuration }}
+
+      - name: Upload per-OS coverage (macOS → temp)
+        if: inputs.performTests == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmp-coverage-macos
+          path: |
+            ${{ inputs.srcFolder }}/**/coverage.opencover.xml
+            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          if-no-files-found: warn
+          retention-days: 3
+
+  # ============================
+  # COLLECTOR (waits for all 3) — uploads once + Codecov
+  # ============================
+  collect-coverage:
+    needs:
+      - build-windows
+      - build-linux
+      - build-macos
+    if: inputs.performTests == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for PR summary context)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Download temp coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: tmp-coverage-*
+          path: ./.collect
+          merge-multiple: true
+
+      - name: Install ReportGenerator (for merged report)
+        if: inputs.mergeCoverage == true
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Merge & Generate HTML + Summary
+        if: inputs.mergeCoverage == true
+        shell: bash
+        run: |
+          mkdir -p ./.artifacts/coverage-merged
+          reportgenerator \
+            -reports:"./.collect/**/coverage.cobertura.xml" \
+            -targetdir:"./.artifacts/coverage-merged" \
+            -reporttypes:"${{ inputs.coverageReportTypes }}"
+          if [ -f "./.artifacts/coverage-merged/SummaryGithub.md" ]; then
+            echo "## Combined Coverage" >> "$GITHUB_STEP_SUMMARY"
+            cat "./.artifacts/coverage-merged/SummaryGithub.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload single consolidated artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.mergedCoverageArtifactName }}
+          path: |
+            ./.collect/**/coverage.opencover.xml
+            ./.collect/**/coverage.cobertura.xml
+            ./.artifacts/coverage-merged/**
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload to Codecov
+        if: inputs.uploadCodecov == true && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: |
+            ./.collect/**/coverage.cobertura.xml
+            ./.collect/**/coverage.opencover.xml
+          flags: ${{ inputs.codecovFlags }}
+          name: ${{ inputs.codecovName }}
+          disable_search: true
+          fail_ci_if_error: true
+
+      # Optional: delete temp per-OS artifacts so only the consolidated one remains
+      - name: Cleanup per-OS temp artifacts
+        if: inputs.cleanupPerOsArtifacts == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          for name in tmp-coverage-windows tmp-coverage-linux tmp-coverage-macos; do
+            id=$(gh api repos/$REPO/actions/artifacts --paginate --jq ".artifacts[] | select(.name==\"$name\") | .id" | head -n1)
+            if [ -n "$id" ]; then
+              gh api -X DELETE repos/$REPO/actions/artifacts/$id
+              echo "Deleted $name (id $id)"
+            else
+              echo "No artifact named $name found to delete."
+            fi
+          done
