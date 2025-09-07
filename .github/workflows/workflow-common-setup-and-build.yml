@@ -218,7 +218,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tmp-coverage-windows
-          path: ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          # FIX: Added a wildcard (*) to match multi-targeted report filenames
+          path: ${{ inputs.srcFolder }}/**/coverage.*.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
@@ -298,7 +299,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tmp-coverage-linux
-          path: ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          # FIX: Added a wildcard (*) to match multi-targeted report filenames
+          path: ${{ inputs.srcFolder }}/**/coverage.*.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
@@ -370,7 +372,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tmp-coverage-macos
-          path: ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+          # FIX: Added a wildcard (*) to match multi-targeted report filenames
+          path: ${{ inputs.srcFolder }}/**/coverage.*.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
@@ -400,7 +403,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.mergedCoverageArtifactName }}
-          path: ./.collect/**/coverage.cobertura.xml
+          # FIX: Added a wildcard (*) to match multi-targeted report filenames
+          path: ./.collect/**/coverage.*.cobertura.xml
           if-no-files-found: warn
           retention-days: 30
 
@@ -409,7 +413,8 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./.collect/**/coverage.cobertura.xml
+          # FIX: Added a wildcard (*) to match multi-targeted report filenames
+          files: ./.collect/**/coverage.*.cobertura.xml
           flags: ${{ inputs.codecovFlags }}
           name: ${{ inputs.codecovName }}
           disable_search: true
