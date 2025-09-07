@@ -54,6 +54,12 @@ on:
         default: true
         description: 'Upload NuGet packages from Windows job'
 
+      # Back-compat: deprecated/no-op. Keep for callers that still pass it.
+      installWorkloads:
+        type: boolean
+        default: false
+        description: '(DEPRECATED) Ignored. Workloads are restored via dotnet workload restore only.'
+
       useUNO:
         type: boolean
         default: false
@@ -426,7 +432,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.mergedCoverageArtifactName }}
-        # include raw xmls from each OS + merged HTML if present
           path: |
             ./.collect/**/coverage.opencover.xml
             ./.collect/**/coverage.cobertura.xml
