@@ -217,8 +217,8 @@ jobs:
         if: inputs.performTests == true
         uses: actions/upload-artifact@v4
         with:
-          name: tmp-coverage-windows
-          path: ${{ inputs.srcFolder }}/**/coverage.*.cobertura.xml
+          name: tmp-coverage-${{ runner.os }}
+          path: ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
@@ -231,10 +231,18 @@ jobs:
           if-no-files-found: warn
 
   # ============================
-  # LINUX (parallel)
+  # LINUX & MACOS (parallel matrix)
   # ============================
-  build-linux:
-    runs-on: ubuntu-latest
+  build-unix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: macos-latest
+            restore-prefix: sudo
+          - os: ubuntu-latest
+            restore-prefix: ''
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
     steps:
@@ -265,13 +273,12 @@ jobs:
 
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
-        shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
           if [ -n "${{ inputs.solutionFile }}" ]; then
-            dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
+            ${{ matrix.restore-prefix }} dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
           else
-            dotnet workload restore --skip-manifest-update
+            ${{ matrix.restore-prefix }} dotnet workload restore --skip-manifest-update
           fi
 
       - name: Restore
@@ -282,7 +289,7 @@ jobs:
         run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
         working-directory: ${{ inputs.srcFolder }}
 
-      - name: Tests + Coverage (Linux)
+      - name: Tests + Coverage
         if: inputs.performTests == true
         uses: glennawatson/coverlet-msbuild@v2.1
         with:
@@ -293,95 +300,22 @@ jobs:
           output-format: '"${{ inputs.coverageFormats }}"'
           configuration: ${{ inputs.configuration }}
 
-      - name: Upload per-OS coverage (Linux → temp)
+      - name: Upload per-OS coverage (temp)
         if: inputs.performTests == true
         uses: actions/upload-artifact@v4
         with:
-          name: tmp-coverage-linux
-          path: ${{ inputs.srcFolder }}/**/coverage.*.cobertura.xml
+          name: tmp-coverage-${{ runner.os }}
+          path: ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
   # ============================
-  # macOS (parallel)
-  # ============================
-  build-macos:
-    runs-on: macos-latest
-    env:
-      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Setup .NET (with NuGet cache)
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: ${{ inputs.dotnetVersions }}
-          cache: true
-          cache-dependency-path: |
-            **/Directory.Packages.props
-            **/*.sln
-            **/*.csproj
-            **/global.json
-            **/nuget.config
-
-      - name: Cache NuGet HTTP (v3)
-        uses: actions/cache@v4
-        with:
-          path: ~/.local/share/NuGet/v3-cache
-          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nugetv3-
-
-      - name: Restore .NET Workloads
-        if: inputs.installWorkloads == true
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          if [ -n "${{ inputs.solutionFile }}" ]; then
-            sudo dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
-          else
-            sudo dotnet workload restore --skip-manifest-update
-          fi
-
-      - name: Restore
-        run: dotnet restore ${{ inputs.solutionFile }}
-        working-directory: ${{ inputs.srcFolder }}
-
-      - name: Build
-        run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
-        working-directory: ${{ inputs.srcFolder }}
-
-      - name: Tests + Coverage (macOS)
-        if: inputs.performTests == true
-        uses: glennawatson/coverlet-msbuild@v2.1
-        with:
-          project-files: '${{ inputs.srcFolder }}/${{ inputs.testsProjectGlob }}'
-          no-build: true
-          exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
-          include-filter: '[${{inputs.productNamespacePrefix}}*]*'
-          output-format: '"${{ inputs.coverageFormats }}"'
-          configuration: ${{ inputs.configuration }}
-
-      - name: Upload per-OS coverage (macOS → temp)
-        if: inputs.performTests == true
-        uses: actions/upload-artifact@v4
-        with:
-          name: tmp-coverage-macos
-          path: ${{ inputs.srcFolder }}/**/coverage.*.cobertura.xml
-          if-no-files-found: warn
-          retention-days: 3
-
-  # ============================
-  # COLLECTOR (waits for all 3) — uploads once + Codecov
+  # COLLECTOR (waits for all) — uploads once + Codecov
   # ============================
   collect-coverage:
     needs:
       - build-windows
-      - build-linux
-      - build-macos
+      - build-unix
     if: inputs.performTests == true
     runs-on: ubuntu-latest
     steps:
@@ -400,7 +334,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.mergedCoverageArtifactName }}
-          # FIX: Upload the entire .collect directory for a more robust debug artifact.
           path: ./.collect
           if-no-files-found: warn
           retention-days: 30
@@ -410,14 +343,13 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./.collect/**/coverage.*.cobertura.xml
+          files: ./.collect/**/coverage*.cobertura.xml
           flags: ${{ inputs.codecovFlags }}
           name: ${{ inputs.codecovName }}
           disable_search: true
           fail_ci_if_error: true
 
       - name: Cleanup per-OS temp artifacts
-        # FIX: Added continue-on-error to prevent this non-critical step from failing the workflow.
         continue-on-error: true
         if: inputs.cleanupPerOsArtifacts == true
         env:
@@ -425,7 +357,7 @@ jobs:
           REPO: ${{ github.repository }}
         shell: bash
         run: |
-          for name in tmp-coverage-windows tmp-coverage-linux tmp-coverage-macos; do
+          for name in tmp-coverage-windows tmp-coverage-Linux tmp-coverage-macOS; do
             id=$(gh api repos/$REPO/actions/artifacts --paginate --jq ".artifacts[] | select(.name==\"$name\") | .id" | head -n1)
             if [ -n "$id" ]; then
               gh api -X DELETE repos/$REPO/actions/artifacts/$id
