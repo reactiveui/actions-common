@@ -127,7 +127,6 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            %USERPROFILE%\.nuget\packages
             %LOCALAPPDATA%\NuGet\v3-cache        
           key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
           restore-keys: |
