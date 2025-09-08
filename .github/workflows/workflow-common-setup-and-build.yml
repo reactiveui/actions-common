@@ -333,8 +333,8 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         run: |
           pip install codecov-cli
-          codecov-cli upload-coverage -R './.collect' --fail-on-error
-
+          codecov-cli upload-coverage -s './.collect' --fail-on-error
+          
       - name: Cleanup per-OS temp artifacts
         continue-on-error: true
         if: inputs.cleanupPerOsArtifacts == true
