@@ -116,7 +116,7 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnetVersions }}
-          dotnet-quality: 'preview'
+          #dotnet-quality: 'preview'
           cache: true
           cache-dependency-path: |
             **/Directory.Packages.props
@@ -221,6 +221,7 @@ jobs:
   build-unix:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
         include:
