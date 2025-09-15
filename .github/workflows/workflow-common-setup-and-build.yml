@@ -162,14 +162,8 @@ jobs:
         with:
           setAllVars: true
 
-      - name: Install NuGet (CLI)
-        uses: nuget/setup-nuget@v2
-        with:
-          nuget-api-key: ${{ secrets.NuGetAPIKey }}
-          nuget-version: '6.x'
-
       - name: NuGet Restore
-        run: nuget restore ${{ inputs.solutionFile }}
+        run: dotnet restore ${{ inputs.solutionFile }}
         working-directory: ${{ inputs.srcFolder }}
 
       - name: Add MSBuild to PATH (UNO)
