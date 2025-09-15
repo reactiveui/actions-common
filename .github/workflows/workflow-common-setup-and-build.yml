@@ -17,6 +17,7 @@ on:
         default: |
           8.0.x
           9.0.x
+          10.0.x
         description: 'Newline-separated list of .NET SDKs'
 
       productNamespacePrefix:
@@ -115,6 +116,7 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ inputs.dotnetVersions }}
+          dotnet-quality: 'preview'
           cache: true
           cache-dependency-path: |
             **/Directory.Packages.props
