@@ -139,7 +139,7 @@ jobs:
         shell: bash
         run: |
           echo "Downloading Visual Studio 2026 Insiders bootstrapper..."
-          curl -Lo vs_enterprise.exe https://aka.ms/vs/18/insider/vs_enterprise.exe
+          curl -L -o vs_enterprise.exe "https://aka.ms/vs/18/insider/vs_enterprise.exe"
 
           echo "Starting Visual Studio 2026 Insiders installation..."
           ./vs_enterprise.exe --wait \
@@ -147,6 +147,7 @@ jobs:
             --add Microsoft.VisualStudio.Workload.ManagedDesktop \
             --add Microsoft.VisualStudio.Workload.Universal \
             --add Microsoft.VisualStudio.Workload.NetWeb \
+            --quiet \
             --installPath "C:\Program Files\Microsoft Visual Studio\2026\Enterprise"
 
           echo "Visual Studio installation complete."
