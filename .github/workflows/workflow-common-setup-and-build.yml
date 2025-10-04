@@ -139,9 +139,8 @@ jobs:
         shell: bash
         run: |
           dotnet tool update -g dotnet-vs
-          vs install Enterprise -pre +mobile +desktop +uwp +web
+          vs install Enterprise --channelId VisualStudio.18.Release +mobile +desktop +uwp +web
           vs where release
-
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
         shell: bash
