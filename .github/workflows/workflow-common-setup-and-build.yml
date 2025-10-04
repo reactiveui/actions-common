@@ -135,13 +135,11 @@ jobs:
             ${{ runner.os }}-nugetv3-
 
       - name: Get Latest Visual Studio Version
-        if: inputs.useVisualStudioPreview == true
+        if: inputs.useUNO == true
         shell: bash
         run: |
           dotnet tool update -g dotnet-vs
-          vs where release
-          vs update release Enterprise
-          vs modify release Enterprise +mobile +desktop +uwp +web
+          vs install Enterprise -pre +mobile +desktop +uwp +web
           vs where release
 
       - name: Restore .NET Workloads
