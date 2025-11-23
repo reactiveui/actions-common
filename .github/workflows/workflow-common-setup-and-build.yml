@@ -107,7 +107,7 @@ jobs:
       nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           lfs: true
@@ -241,7 +241,7 @@ jobs:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -314,7 +314,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (for PR summary context)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
