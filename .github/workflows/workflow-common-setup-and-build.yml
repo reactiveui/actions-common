@@ -208,7 +208,7 @@ jobs:
 
       - name: Upload per-OS coverage (Windows → temp)
         if: inputs.performTests == true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: tmp-coverage-${{ runner.os }}
           path: ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
@@ -217,7 +217,7 @@ jobs:
 
       - name: Upload NuGet Packages
         if: inputs.createArtifacts == true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: nuget
           path: '**/*.nupkg'
@@ -296,7 +296,7 @@ jobs:
 
       - name: Upload per-OS coverage (temp)
         if: inputs.performTests == true
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: tmp-coverage-${{ runner.os }}
           path: ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
@@ -319,13 +319,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download temp coverage artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           pattern: tmp-coverage-*
           path: ./.collect
 
       - name: Upload raw coverage reports (for debugging)
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ inputs.mergedCoverageArtifactName }}
           path: ./.collect
