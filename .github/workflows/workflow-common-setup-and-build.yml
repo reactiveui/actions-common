@@ -126,7 +126,7 @@ jobs:
             **/nuget.config
 
       - name: Cache NuGet HTTP (v3)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             %LOCALAPPDATA%\NuGet\v3-cache        
@@ -258,7 +258,7 @@ jobs:
             **/nuget.config
 
       - name: Cache NuGet HTTP (v3)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/share/NuGet/v3-cache
           key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
