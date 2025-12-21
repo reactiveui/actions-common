@@ -72,7 +72,12 @@ on:
       coverageFormats:
         type: string
         default: 'cobertura'
-        description: 'Coverlet formats to output'
+        description: 'Coverage output format (cobertura, xml, coverage)'
+
+      testingMode:
+        type: string
+        default: 'auto'
+        description: 'Testing mode: auto (detect), mtp (Microsoft Testing Platform), legacy (Coverlet)'
 
       mergedCoverageArtifactName:
         type: string
@@ -195,8 +200,50 @@ jobs:
         run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
         working-directory: ${{ inputs.srcFolder }}
 
-      - name: Tests + Coverage (Windows)
+      - name: Detect Testing Mode
         if: inputs.performTests == true
+        id: detect-mode
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        run: |
+          MODE="${{ inputs.testingMode }}"
+
+          if [ "$MODE" == "auto" ]; then
+            echo "🔍 Auto-detecting testing platform..."
+
+            # Recursive search for MTP indicators
+            if grep -r "Microsoft.Testing.Extensions.CodeCoverage" . --include="*.props" --include="*.targets" --include="*.csproj" > /dev/null 2>&1; then
+              MODE="mtp"
+              echo "✅ MTP coverage extension detected"
+            elif grep -r "TestingPlatformDotnetTestSupport" . --include="*.props" > /dev/null 2>&1; then
+              MODE="mtp"
+              echo "✅ MTP DotnetTestSupport detected"
+            else
+              MODE="legacy"
+              echo "⚠️  No MTP indicators found - using legacy Coverlet"
+            fi
+          fi
+
+          echo "mode=$MODE" >> $GITHUB_OUTPUT
+          echo "📋 Testing mode: $MODE"
+
+      - name: Tests + Coverage (MTP)
+        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        run: |
+          dotnet test ${{ inputs.solutionFile }} \
+            --no-build \
+            --configuration ${{ inputs.configuration }} \
+            --coverage \
+            --coverage-output-format ${{ inputs.coverageFormats }} \
+            --coverage-output coverage.cobertura.xml \
+            -- "CodeCoverage.ModulePaths.Include.0=${{ inputs.productNamespacePrefix }}.*" \
+               "CodeCoverage.ModulePaths.Exclude.0=.*\.Tests" \
+               "CodeCoverage.SkipAutoProperties=true"
+
+      - name: Tests + Coverage (Legacy Coverlet)
+        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'legacy'
         uses: glennawatson/coverlet-msbuild@v2.1
         with:
           project-files: '${{ inputs.srcFolder }}/${{ inputs.testsProjectGlob }}'
@@ -211,7 +258,10 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: tmp-coverage-${{ runner.os }}
-          path: ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
+          path: |
+            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+            ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
+            ${{ inputs.srcFolder }}/**/TestResults/**/*.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
@@ -283,8 +333,50 @@ jobs:
         run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
         working-directory: ${{ inputs.srcFolder }}
 
-      - name: Tests + Coverage
+      - name: Detect Testing Mode
         if: inputs.performTests == true
+        id: detect-mode
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        run: |
+          MODE="${{ inputs.testingMode }}"
+
+          if [ "$MODE" == "auto" ]; then
+            echo "🔍 Auto-detecting testing platform..."
+
+            # Recursive search for MTP indicators
+            if grep -r "Microsoft.Testing.Extensions.CodeCoverage" . --include="*.props" --include="*.targets" --include="*.csproj" > /dev/null 2>&1; then
+              MODE="mtp"
+              echo "✅ MTP coverage extension detected"
+            elif grep -r "TestingPlatformDotnetTestSupport" . --include="*.props" > /dev/null 2>&1; then
+              MODE="mtp"
+              echo "✅ MTP DotnetTestSupport detected"
+            else
+              MODE="legacy"
+              echo "⚠️  No MTP indicators found - using legacy Coverlet"
+            fi
+          fi
+
+          echo "mode=$MODE" >> $GITHUB_OUTPUT
+          echo "📋 Testing mode: $MODE"
+
+      - name: Tests + Coverage (MTP)
+        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        run: |
+          dotnet test ${{ inputs.solutionFile }} \
+            --no-build \
+            --configuration ${{ inputs.configuration }} \
+            --coverage \
+            --coverage-output-format ${{ inputs.coverageFormats }} \
+            --coverage-output coverage.cobertura.xml \
+            -- "CodeCoverage.ModulePaths.Include.0=${{ inputs.productNamespacePrefix }}.*" \
+               "CodeCoverage.ModulePaths.Exclude.0=.*\.Tests" \
+               "CodeCoverage.SkipAutoProperties=true"
+
+      - name: Tests + Coverage (Legacy Coverlet)
+        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'legacy'
         uses: glennawatson/coverlet-msbuild@v2.1
         with:
           project-files: '${{ inputs.srcFolder }}/${{ inputs.testsProjectGlob }}'
@@ -299,7 +391,10 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: tmp-coverage-${{ runner.os }}
-          path: ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
+          path: |
+            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
+            ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
+            ${{ inputs.srcFolder }}/**/TestResults/**/*.cobertura.xml
           if-no-files-found: warn
           retention-days: 3
 
