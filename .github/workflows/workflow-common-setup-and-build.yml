@@ -243,9 +243,10 @@ jobs:
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
-          dotnet test ${{ inputs.solutionFile }} \
+          dotnet test --solution ${{ inputs.solutionFile }} \
             --no-build \
             --configuration ${{ inputs.configuration }} \
+            --coverage \
             --results-directory ./TestResults
 
       - name: Tests + Coverage (Legacy Coverlet)
@@ -382,9 +383,10 @@ jobs:
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
-          dotnet test ${{ inputs.solutionFile }} \
+          dotnet test --solution ${{ inputs.solutionFile }} \
             --no-build \
             --configuration ${{ inputs.configuration }} \
+            --coverage \
             --results-directory ./TestResults
 
       - name: Tests + Coverage (Legacy Coverlet)
