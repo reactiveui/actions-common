@@ -247,6 +247,7 @@ jobs:
             --no-build \
             --configuration ${{ inputs.configuration }} \
             --coverage \
+            --coverage-output-format cobertura \
             --results-directory ./TestResults
 
       - name: Tests + Coverage (Legacy Coverlet)
@@ -387,6 +388,7 @@ jobs:
             --no-build \
             --configuration ${{ inputs.configuration }} \
             --coverage \
+            --coverage-output-format cobertura \
             --results-directory ./TestResults
 
       - name: Tests + Coverage (Legacy Coverlet)
