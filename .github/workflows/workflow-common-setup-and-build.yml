@@ -483,7 +483,10 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         run: |
           pip install codecov-cli
-          codecov-cli upload-coverage -s './.collect' --fail-on-error
+          # Find all cobertura files and upload each one explicitly
+          find ./.collect -name '*.cobertura.xml' -type f | while read -r file; do
+            codecov-cli upload-coverage --file "$file"
+          done
           
       - name: Cleanup per-OS temp artifacts
         continue-on-error: true
