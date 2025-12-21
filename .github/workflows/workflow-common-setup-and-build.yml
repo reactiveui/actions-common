@@ -209,18 +209,29 @@ jobs:
           MODE="${{ inputs.testingMode }}"
 
           if [ "$MODE" == "auto" ]; then
-            echo "🔍 Auto-detecting testing platform..."
+            echo "🔍 Auto-detecting testing platform in ${{ inputs.srcFolder }}..."
 
-            # Recursive search for MTP indicators
+            # Check for MTP indicator (the coverage package)
             if grep -r "Microsoft.Testing.Extensions.CodeCoverage" . --include="*.props" --include="*.targets" --include="*.csproj" > /dev/null 2>&1; then
-              MODE="mtp"
-              echo "✅ MTP coverage extension detected"
-            elif grep -r "TestingPlatformDotnetTestSupport" . --include="*.props" > /dev/null 2>&1; then
-              MODE="mtp"
-              echo "✅ MTP DotnetTestSupport detected"
+              echo "✅ MTP Package detected."
+
+              # Enforce CLEAN BREAK: Native JSON config must exist in the source folder
+              if [ -f "testconfig.json" ]; then
+                MODE="mtp"
+                echo "🚀 Clean Break Mode: Found testconfig.json in ${{ inputs.srcFolder }}"
+              else
+                echo "❌ ERROR: MTP detected but 'testconfig.json' is missing in ${{ inputs.srcFolder }}!"
+                echo ""
+                echo "Microsoft Best Practices for MTP require a 'testconfig.json' file to manage coverage and execution."
+                echo "This native JSON configuration eliminates CLI switch errors (MSB1001) and ensures local/CI parity."
+                echo ""
+                echo "Create ${{ inputs.srcFolder }}/testconfig.json with coverage settings:"
+                echo "https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
+                exit 1
+              fi
             else
               MODE="legacy"
-              echo "⚠️  No MTP indicators found - using legacy Coverlet"
+              echo "⚠️  No MTP indicators found - falling back to legacy Coverlet"
             fi
           fi
 
@@ -235,12 +246,7 @@ jobs:
           dotnet test ${{ inputs.solutionFile }} \
             --no-build \
             --configuration ${{ inputs.configuration }} \
-            --coverage \
-            --coverage-output-format ${{ inputs.coverageFormats }} \
-            --coverage-output coverage.cobertura.xml \
-            -- "CodeCoverage.ModulePaths.Include.0=${{ inputs.productNamespacePrefix }}.*" \
-               "CodeCoverage.ModulePaths.Exclude.0=.*\.Tests" \
-               "CodeCoverage.SkipAutoProperties=true"
+            --results-directory ./TestResults
 
       - name: Tests + Coverage (Legacy Coverlet)
         if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'legacy'
@@ -342,18 +348,29 @@ jobs:
           MODE="${{ inputs.testingMode }}"
 
           if [ "$MODE" == "auto" ]; then
-            echo "🔍 Auto-detecting testing platform..."
+            echo "🔍 Auto-detecting testing platform in ${{ inputs.srcFolder }}..."
 
-            # Recursive search for MTP indicators
+            # Check for MTP indicator (the coverage package)
             if grep -r "Microsoft.Testing.Extensions.CodeCoverage" . --include="*.props" --include="*.targets" --include="*.csproj" > /dev/null 2>&1; then
-              MODE="mtp"
-              echo "✅ MTP coverage extension detected"
-            elif grep -r "TestingPlatformDotnetTestSupport" . --include="*.props" > /dev/null 2>&1; then
-              MODE="mtp"
-              echo "✅ MTP DotnetTestSupport detected"
+              echo "✅ MTP Package detected."
+
+              # Enforce CLEAN BREAK: Native JSON config must exist in the source folder
+              if [ -f "testconfig.json" ]; then
+                MODE="mtp"
+                echo "🚀 Clean Break Mode: Found testconfig.json in ${{ inputs.srcFolder }}"
+              else
+                echo "❌ ERROR: MTP detected but 'testconfig.json' is missing in ${{ inputs.srcFolder }}!"
+                echo ""
+                echo "Microsoft Best Practices for MTP require a 'testconfig.json' file to manage coverage and execution."
+                echo "This native JSON configuration eliminates CLI switch errors (MSB1001) and ensures local/CI parity."
+                echo ""
+                echo "Create ${{ inputs.srcFolder }}/testconfig.json with coverage settings:"
+                echo "https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
+                exit 1
+              fi
             else
               MODE="legacy"
-              echo "⚠️  No MTP indicators found - using legacy Coverlet"
+              echo "⚠️  No MTP indicators found - falling back to legacy Coverlet"
             fi
           fi
 
@@ -368,12 +385,7 @@ jobs:
           dotnet test ${{ inputs.solutionFile }} \
             --no-build \
             --configuration ${{ inputs.configuration }} \
-            --coverage \
-            --coverage-output-format ${{ inputs.coverageFormats }} \
-            --coverage-output coverage.cobertura.xml \
-            -- "CodeCoverage.ModulePaths.Include.0=${{ inputs.productNamespacePrefix }}.*" \
-               "CodeCoverage.ModulePaths.Exclude.0=.*\.Tests" \
-               "CodeCoverage.SkipAutoProperties=true"
+            --results-directory ./TestResults
 
       - name: Tests + Coverage (Legacy Coverlet)
         if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'legacy'
