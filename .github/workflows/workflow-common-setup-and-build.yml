@@ -238,12 +238,29 @@ jobs:
           echo "mode=$MODE" >> $GITHUB_OUTPUT
           echo "📋 Testing mode: $MODE"
 
+      - name: Resolve Solution File
+        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
+        id: resolve-solution
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        run: |
+          if [ -n "${{ inputs.solutionFile }}" ]; then
+            echo "solution-arg=--solution ${{ inputs.solutionFile }}" >> $GITHUB_OUTPUT
+          else
+            SLN_FILE=$(find . -maxdepth 1 -name "*.sln" | head -n 1)
+            if [ -n "$SLN_FILE" ]; then
+              echo "solution-arg=--solution $SLN_FILE" >> $GITHUB_OUTPUT
+            else
+              echo "solution-arg=" >> $GITHUB_OUTPUT
+            fi
+          fi
+
       - name: Tests + Coverage (MTP)
         if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
-          dotnet test --solution ${{ inputs.solutionFile }} \
+          dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
             --no-build \
             --configuration ${{ inputs.configuration }} \
             --coverage \
@@ -379,12 +396,29 @@ jobs:
           echo "mode=$MODE" >> $GITHUB_OUTPUT
           echo "📋 Testing mode: $MODE"
 
+      - name: Resolve Solution File
+        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
+        id: resolve-solution
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        run: |
+          if [ -n "${{ inputs.solutionFile }}" ]; then
+            echo "solution-arg=--solution ${{ inputs.solutionFile }}" >> $GITHUB_OUTPUT
+          else
+            SLN_FILE=$(find . -maxdepth 1 -name "*.sln" | head -n 1)
+            if [ -n "$SLN_FILE" ]; then
+              echo "solution-arg=--solution $SLN_FILE" >> $GITHUB_OUTPUT
+            else
+              echo "solution-arg=" >> $GITHUB_OUTPUT
+            fi
+          fi
+
       - name: Tests + Coverage (MTP)
         if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
-          dotnet test --solution ${{ inputs.solutionFile }} \
+          dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
             --no-build \
             --configuration ${{ inputs.configuration }} \
             --coverage \
