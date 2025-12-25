@@ -94,6 +94,11 @@ on:
         default: true
         description: 'Upload coverage to Codecov in the collector job'
 
+      enableDetailedTestLogging:
+        type: boolean
+        default: true
+        description: 'Enable detailed verbosity for MTP test runs (useful for debugging hangs)'
+
     secrets:
       NuGetAPIKey:
         required: false
@@ -260,9 +265,15 @@ jobs:
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
+          VERBOSITY_ARGS=""
+          if [ "${{ inputs.enableDetailedTestLogging }}" == "true" ]; then
+            VERBOSITY_ARGS="--verbosity detailed --output Detailed"
+          fi
+
           dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
             --no-build \
             --configuration ${{ inputs.configuration }} \
+            $VERBOSITY_ARGS \
             --coverage \
             --coverage-output-format cobertura \
             --results-directory ./TestResults
@@ -418,9 +429,15 @@ jobs:
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
         run: |
+          VERBOSITY_ARGS=""
+          if [ "${{ inputs.enableDetailedTestLogging }}" == "true" ]; then
+            VERBOSITY_ARGS="--verbosity detailed --output Detailed"
+          fi
+
           dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
             --no-build \
             --configuration ${{ inputs.configuration }} \
+            $VERBOSITY_ARGS \
             --coverage \
             --coverage-output-format cobertura \
             --results-directory ./TestResults
