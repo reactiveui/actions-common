@@ -96,7 +96,7 @@ on:
 
       enableDetailedTestLogging:
         type: boolean
-        default: true
+        default: false
         description: 'Enable detailed verbosity for MTP test runs (useful for debugging hangs)'
 
     secrets:
