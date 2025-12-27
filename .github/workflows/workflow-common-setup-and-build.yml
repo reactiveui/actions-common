@@ -144,23 +144,23 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
-      - name: Get Latest Visual Studio Version
-        if: inputs.useUNO == true
-        shell: bash
-        run: |
-          echo "Downloading Visual Studio 2026 Insiders bootstrapper..."
-          curl -L -o vs_enterprise.exe "https://aka.ms/vs/18/insider/vs_enterprise.exe"
+#      - name: Get Latest Visual Studio Version
+#        if: inputs.useUNO == true
+#        shell: bash
+#        run: |
+#          echo "Downloading Visual Studio 2026 Insiders bootstrapper..."
+#          curl -L -o vs_enterprise.exe "https://aka.ms/vs/18/insider/vs_enterprise.exe"
 
-          echo "Starting Visual Studio 2026 Insiders installation..."
-          ./vs_enterprise.exe --wait \
-            --add Microsoft.VisualStudio.Workload.NetCrossPlat \
-            --add Microsoft.VisualStudio.Workload.ManagedDesktop \
-            --add Microsoft.VisualStudio.Workload.Universal \
-            --add Microsoft.VisualStudio.Workload.NetWeb \
-            --quiet \
-            --installPath "C:\Program Files\Microsoft Visual Studio\2026\Enterprise"
+#          echo "Starting Visual Studio 2026 Insiders installation..."
+#          ./vs_enterprise.exe --wait \
+#            --add Microsoft.VisualStudio.Workload.NetCrossPlat \
+#            --add Microsoft.VisualStudio.Workload.ManagedDesktop \
+#            --add Microsoft.VisualStudio.Workload.Universal \
+#            --add Microsoft.VisualStudio.Workload.NetWeb \
+#            --quiet \
+#            --installPath "C:\Program Files\Microsoft Visual Studio\2026\Enterprise"
 
-          echo "Visual Studio installation complete."
+#          echo "Visual Studio installation complete."
 
       - name: Restore .NET Workloads
         if: inputs.installWorkloads == true
