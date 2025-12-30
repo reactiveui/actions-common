@@ -130,7 +130,6 @@ jobs:
           cache: true
           cache-dependency-path: |
             **/Directory.Packages.props
-            **/*.sln
             **/*.csproj
             **/global.json
             **/nuget.config
@@ -140,7 +139,7 @@ jobs:
         with:
           path: |
             %LOCALAPPDATA%\NuGet\v3-cache        
-          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
+          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
@@ -252,7 +251,7 @@ jobs:
           if [ -n "${{ inputs.solutionFile }}" ]; then
             echo "solution-arg=--solution ${{ inputs.solutionFile }}" >> $GITHUB_OUTPUT
           else
-            SLN_FILE=$(find . -maxdepth 1 -name "*.sln" | head -n 1)
+            SLN_FILE=$(find . -maxdepth 1 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1)
             if [ -n "$SLN_FILE" ]; then
               echo "solution-arg=--solution $SLN_FILE" >> $GITHUB_OUTPUT
             else
@@ -338,7 +337,6 @@ jobs:
           cache: true
           cache-dependency-path: |
             **/Directory.Packages.props
-            **/*.sln
             **/*.csproj
             **/global.json
             **/nuget.config
@@ -347,7 +345,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.local/share/NuGet/v3-cache
-          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.sln', '**/*.csproj', '**/global.json', '**/nuget.config') }}
+          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
           restore-keys: |
             ${{ runner.os }}-nugetv3-
 
@@ -416,7 +414,7 @@ jobs:
           if [ -n "${{ inputs.solutionFile }}" ]; then
             echo "solution-arg=--solution ${{ inputs.solutionFile }}" >> $GITHUB_OUTPUT
           else
-            SLN_FILE=$(find . -maxdepth 1 -name "*.sln" | head -n 1)
+            SLN_FILE=$(find . -maxdepth 1 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1)
             if [ -n "$SLN_FILE" ]; then
               echo "solution-arg=--solution $SLN_FILE" >> $GITHUB_OUTPUT
             else

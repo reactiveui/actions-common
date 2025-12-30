@@ -116,7 +116,7 @@ jobs:
         nuget-version: '6.x'
 
     - name: NuGet Restore 
-      run: nuget restore ${{ inputs.solutionFile }}
+      run: dotnet restore ${{ inputs.solutionFile }}
       working-directory: ${{ inputs.srcFolder }}
 
     - name: Build DotNet
