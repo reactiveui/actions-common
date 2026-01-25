@@ -167,9 +167,9 @@ jobs:
         working-directory: ${{ inputs.srcFolder }}
         run: |
           if [ -n "${{ inputs.solutionFile }}" ]; then
-            dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}" --from-previous-sdk
+            dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
           else
-            dotnet workload restore --skip-manifest-update --from-previous-sdk
+            dotnet workload restore --skip-manifest-update
           fi
 
       - name: NBGV
