@@ -329,6 +329,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          
+      - name: Select Xcode 26
+        if: runner.os == 'macos'
+        run: sudo xcode-select -s /Applications/Xcode_26.app
 
       - name: Setup .NET (with NuGet cache)
         uses: actions/setup-dotnet@v5
