@@ -332,7 +332,7 @@ jobs:
           
       - name: Select Xcode 26
         if: runner.os == 'macos'
-        run: sudo xcode-select -s /Applications/Xcode_26.app
+        run: sudo xcode-select -s /Applications/Xcode_26.0.app
 
       - name: Setup .NET (with NuGet cache)
         uses: actions/setup-dotnet@v5
