@@ -316,9 +316,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-26]
         include:
-          - os: macos-latest
+          - os: macos-26
             restore-prefix: sudo
           - os: ubuntu-latest
             restore-prefix: ''
