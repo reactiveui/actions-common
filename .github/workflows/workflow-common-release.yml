@@ -43,10 +43,10 @@ on:
         default: false
         description: 'Enable UNO-specific msbuild/pack flow (Windows only)'
 
-      createRelease:
-        type: boolean
-        default: true
-        description: 'Create a GitHub Release tagged with NBGV SemVer2 version'
+    outputs:
+      semver2:
+        description: 'The NBGV SemVer2 version string'
+        value: ${{ jobs.build-sign-release.outputs.semver2 }}
 
     secrets:
       ES_USERNAME:
@@ -70,6 +70,8 @@ jobs:
     environment:
       name: release
     runs-on: windows-latest
+    outputs:
+      semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -109,16 +111,6 @@ jobs:
         working-directory: ${{ inputs.srcFolder }}
         run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }} -o "${GITHUB_WORKSPACE}/packages"
 
-      - name: Install GitReleaseNoteGenerator
-        if: inputs.createRelease == true
-        run: dotnet tool install -g GitReleaseNoteGenerator
-
-      - name: Generate release notes
-        if: inputs.createRelease == true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: git-release-notes --release-version "${{ steps.environment.outputs.nbgv-semver2 }}" --output-file release-notes.md
-
       - name: Sign packages with SSL.com eSigner
         uses: SSLcom/esigner-codesign@v1.3.2
         with:
@@ -140,8 +132,3 @@ jobs:
           path: signed/*.nupkg
           if-no-files-found: error
 
-      - name: Create GitHub Release
-        if: inputs.createRelease == true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ steps.environment.outputs.nbgv-semver2 }}" --repo "${{ github.repository }}" --title "${{ steps.environment.outputs.nbgv-semver2 }}" --notes-file release-notes.md

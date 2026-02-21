@@ -1,0 +1,35 @@
+name: Common GitHub release creation workflow
+
+permissions:
+  contents: write
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+        description: 'Version string used for the release tag, title, and release notes heading'
+
+jobs:
+  # ============================
+  # CREATE GITHUB RELEASE (Linux)
+  # ============================
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+
+      - name: Install GitReleaseNoteGenerator
+        run: dotnet tool install -g GitReleaseNoteGenerator
+
+      - name: Generate release notes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: git-release-notes --release-version "${{ inputs.version }}" --output-file release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ inputs.version }}" --repo "${{ github.repository }}" --title "${{ inputs.version }}" --notes-file release-notes.md
