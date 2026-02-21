@@ -43,11 +43,6 @@ on:
         default: false
         description: 'Enable UNO-specific msbuild/pack flow (Windows only)'
 
-      publishToNuGet:
-        type: boolean
-        default: true
-        description: 'Push signed packages to nuget.org'
-
       createRelease:
         type: boolean
         default: true
@@ -66,9 +61,6 @@ on:
       ES_TOTP_SECRET:
         required: true
         description: 'SSL.com eSigner TOTP secret for automated two-factor authentication'
-      NUGET_API_KEY:
-        required: false
-        description: 'NuGet API key for pushing packages (obtain via OIDC in the calling workflow)'
 
 jobs:
   # ============================
@@ -147,14 +139,6 @@ jobs:
           name: signed-nuget
           path: signed/*.nupkg
           if-no-files-found: error
-
-      - name: Push to NuGet
-        if: inputs.publishToNuGet == true
-        shell: bash
-        run: |
-          for pkg in signed/*.nupkg; do
-            dotnet nuget push "$pkg" --source https://api.nuget.org/v3/index.json --api-key "${{ secrets.NUGET_API_KEY }}"
-          done
 
       - name: Create GitHub Release
         if: inputs.createRelease == true
