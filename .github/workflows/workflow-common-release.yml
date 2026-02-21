@@ -2,6 +2,7 @@ name: Common .NET build and release workflow
 
 permissions:
   contents: write
+  id-token: write
 
 on:
   workflow_call:
@@ -66,9 +67,9 @@ on:
       ES_TOTP_SECRET:
         required: true
         description: 'SSL.com eSigner TOTP secret for automated two-factor authentication'
-      NUGET_API_KEY:
+      NUGET_USER:
         required: false
-        description: 'API key for pushing packages to nuget.org (required when publishToNuGet is true)'
+        description: 'NuGet.org username for OIDC trusted publishing (required when publishToNuGet is true)'
 
 jobs:
   # ============================
@@ -130,6 +131,19 @@ jobs:
     environment:
       name: release
     steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+
+      - name: Install GitReleaseNoteGenerator
+        if: inputs.createRelease == true
+        run: dotnet tool install -g GitReleaseNoteGenerator
+
+      - name: Generate release notes
+        if: inputs.createRelease == true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: git-release-notes --release-version "${{ needs.build.outputs.nbgv }}" --output-file "${{ github.workspace }}/release-notes.md"
+
       - name: Download NuGet Packages
         uses: actions/download-artifact@v7
         with:
@@ -157,23 +171,23 @@ jobs:
           path: ./signed/*.nupkg
           if-no-files-found: error
 
-      - name: Setup .NET
+      - name: NuGet login (OIDC trusted publishing)
         if: inputs.publishToNuGet == true
-        uses: actions/setup-dotnet@v5
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
 
       - name: Push to NuGet
         if: inputs.publishToNuGet == true
         shell: bash
         run: |
           for pkg in ./signed/*.nupkg; do
-            dotnet nuget push "$pkg" --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }}
+            dotnet nuget push "$pkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           done
 
       - name: Create GitHub Release
         if: inputs.createRelease == true
-        uses: actions/create-release@v1.1.4
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          tag_name: ${{ needs.build.outputs.nbgv }}
-          release_name: ${{ needs.build.outputs.nbgv }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ needs.build.outputs.nbgv }}" --repo "${{ github.repository }}" --title "${{ needs.build.outputs.nbgv }}" --notes-file "${{ github.workspace }}/release-notes.md"
