@@ -18,17 +18,17 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: NuGet Restore
+    - name: Restore NuGet packages
       shell: bash
       run: dotnet restore ${{ inputs.solution-file }}
       working-directory: ${{ inputs.src-folder }}
 
-    - name: Add MSBuild to PATH
+    - name: Add MSBuild to PATH (Visual Studio)
       uses: microsoft/setup-msbuild@v2
       with:
         vs-prerelease: true
 
-    - name: Build and Pack (msbuild)
+    - name: Build and pack UNO solution with MSBuild
       shell: cmd
       run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solution-file }}
       working-directory: ${{ inputs.src-folder }}

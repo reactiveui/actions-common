@@ -56,14 +56,19 @@ on:
     secrets:
       ES_USERNAME:
         required: true
+        description: 'SSL.com eSigner account username'
       ES_PASSWORD:
         required: true
+        description: 'SSL.com eSigner account password'
       CREDENTIAL_ID:
         required: true
+        description: 'SSL.com eSigner credential ID for the signing certificate'
       ES_TOTP_SECRET:
         required: true
+        description: 'SSL.com eSigner TOTP secret for automated two-factor authentication'
       NUGET_API_KEY:
         required: false
+        description: 'API key for pushing packages to nuget.org (required when publishToNuGet is true)'
 
 jobs:
   # ============================

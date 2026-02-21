@@ -30,7 +30,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Setup .NET (with NuGet cache)
+    - name: Setup .NET SDK with NuGet package cache
       uses: actions/setup-dotnet@v5
       with:
         dotnet-version: ${{ inputs.dotnet-versions }}
@@ -41,7 +41,7 @@ runs:
           **/global.json
           **/nuget.config
 
-    - name: Cache NuGet HTTP (v3) - Windows
+    - name: Cache NuGet HTTP v3 feed responses (Windows)
       if: runner.os == 'Windows'
       uses: actions/cache@v5
       with:
@@ -50,7 +50,7 @@ runs:
         restore-keys: |
           ${{ runner.os }}-nugetv3-
 
-    - name: Cache NuGet HTTP (v3) - Unix
+    - name: Cache NuGet HTTP v3 feed responses (Unix)
       if: runner.os != 'Windows'
       uses: actions/cache@v5
       with:
@@ -74,7 +74,7 @@ runs:
           $PREFIX dotnet workload restore --skip-manifest-update
         fi
 
-    - name: NBGV
+    - name: Stamp version with Nerdbank.GitVersioning
       if: inputs.use-nbgv == 'true'
       id: nbgv
       uses: dotnet/nbgv@v0.4.2

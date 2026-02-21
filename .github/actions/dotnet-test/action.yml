@@ -37,7 +37,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Detect Testing Mode
+    - name: Detect testing platform (MTP vs legacy Coverlet)
       id: detect-mode
       shell: bash
       working-directory: ${{ inputs.src-folder }}
@@ -72,7 +72,7 @@ runs:
         echo "mode=$MODE" >> $GITHUB_OUTPUT
         echo "Testing mode: $MODE"
 
-    - name: Resolve Solution File
+    - name: Resolve solution file for MTP test runner
       if: steps.detect-mode.outputs.mode == 'mtp'
       id: resolve-solution
       shell: bash
@@ -89,7 +89,7 @@ runs:
           fi
         fi
 
-    - name: Tests + Coverage (MTP)
+    - name: Run tests with Microsoft Testing Platform and native coverage
       if: steps.detect-mode.outputs.mode == 'mtp'
       shell: bash
       working-directory: ${{ inputs.src-folder }}
@@ -107,7 +107,7 @@ runs:
           --coverage-output-format cobertura \
           --results-directory ./TestResults
 
-    - name: Tests + Coverage (Legacy Coverlet)
+    - name: Run tests with legacy Coverlet MSBuild coverage
       if: steps.detect-mode.outputs.mode == 'legacy'
       uses: glennawatson/coverlet-msbuild@v2.1
       with:
@@ -118,7 +118,7 @@ runs:
         output-format: '"${{ inputs.coverage-formats }}"'
         configuration: ${{ inputs.configuration }}
 
-    - name: Upload per-OS coverage
+    - name: Upload per-OS coverage reports as build artifacts
       uses: actions/upload-artifact@v6
       with:
         name: tmp-coverage-${{ runner.os }}

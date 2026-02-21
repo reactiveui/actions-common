@@ -102,8 +102,10 @@ on:
     secrets:
       NuGetAPIKey:
         required: false
+        description: 'API key for pushing packages to nuget.org'
       CODECOV_TOKEN:
         required: false
+        description: 'Token for uploading coverage reports to Codecov'
 
 jobs:
   # ============================
