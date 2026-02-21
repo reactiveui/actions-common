@@ -1,0 +1,82 @@
+name: .NET Environment Setup
+description: Setup .NET SDK with caching, optional workloads, and NBGV versioning
+
+inputs:
+  dotnet-versions:
+    description: 'Newline-separated list of .NET SDK versions'
+    required: true
+  src-folder:
+    description: 'Folder containing the solution'
+    required: false
+    default: 'src'
+  solution-file:
+    description: 'Solution file relative to src-folder'
+    required: false
+    default: ''
+  install-workloads:
+    description: 'Run dotnet workload restore'
+    required: false
+    default: 'false'
+  use-nbgv:
+    description: 'Run NBGV to stamp version variables'
+    required: false
+    default: 'true'
+
+outputs:
+  nbgv-semver2:
+    description: 'NBGV SemVer2 version string (empty if NBGV disabled)'
+    value: ${{ steps.nbgv.outputs.SemVer2 }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup .NET (with NuGet cache)
+      uses: actions/setup-dotnet@v5
+      with:
+        dotnet-version: ${{ inputs.dotnet-versions }}
+        cache: true
+        cache-dependency-path: |
+          **/Directory.Packages.props
+          **/*.csproj
+          **/global.json
+          **/nuget.config
+
+    - name: Cache NuGet HTTP (v3) - Windows
+      if: runner.os == 'Windows'
+      uses: actions/cache@v5
+      with:
+        path: '%LOCALAPPDATA%\NuGet\v3-cache'
+        key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
+        restore-keys: |
+          ${{ runner.os }}-nugetv3-
+
+    - name: Cache NuGet HTTP (v3) - Unix
+      if: runner.os != 'Windows'
+      uses: actions/cache@v5
+      with:
+        path: ~/.local/share/NuGet/v3-cache
+        key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
+        restore-keys: |
+          ${{ runner.os }}-nugetv3-
+
+    - name: Restore .NET Workloads
+      if: inputs.install-workloads == 'true'
+      shell: bash
+      working-directory: ${{ inputs.src-folder }}
+      run: |
+        PREFIX=""
+        if [ "$RUNNER_OS" == "macOS" ]; then
+          PREFIX="sudo"
+        fi
+        if [ -n "${{ inputs.solution-file }}" ]; then
+          $PREFIX dotnet workload restore --skip-manifest-update --project "${{ inputs.solution-file }}"
+        else
+          $PREFIX dotnet workload restore --skip-manifest-update
+        fi
+
+    - name: NBGV
+      if: inputs.use-nbgv == 'true'
+      id: nbgv
+      uses: dotnet/nbgv@v0.4.2
+      with:
+        setAllVars: true

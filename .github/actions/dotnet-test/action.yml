@@ -1,0 +1,130 @@
+name: .NET Test
+description: Testing with MTP/legacy auto-detection, coverage collection, and per-OS artifact upload
+
+inputs:
+  configuration:
+    description: 'Build configuration'
+    required: false
+    default: 'Release'
+  src-folder:
+    description: 'Folder containing the solution'
+    required: false
+    default: 'src'
+  solution-file:
+    description: 'Solution file relative to src-folder'
+    required: false
+    default: ''
+  testing-mode:
+    description: 'Testing mode: auto (detect), mtp (Microsoft Testing Platform), legacy (Coverlet)'
+    required: false
+    default: 'auto'
+  tests-project-glob:
+    description: 'Glob for test csproj files, relative to src-folder'
+    required: false
+    default: '**/*Tests*.csproj'
+  coverage-formats:
+    description: 'Coverage output format (cobertura, xml, coverage)'
+    required: false
+    default: 'cobertura'
+  product-namespace-prefix:
+    description: 'Namespace prefix for coverage include/exclude filters'
+    required: true
+  enable-detailed-test-logging:
+    description: 'Enable detailed verbosity for MTP test runs'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Detect Testing Mode
+      id: detect-mode
+      shell: bash
+      working-directory: ${{ inputs.src-folder }}
+      run: |
+        MODE="${{ inputs.testing-mode }}"
+
+        if [ "$MODE" == "auto" ]; then
+          echo "Auto-detecting testing platform in ${{ inputs.src-folder }}..."
+
+          if grep -r "Microsoft.Testing.Extensions.CodeCoverage" . --include="*.props" --include="*.targets" --include="*.csproj" > /dev/null 2>&1; then
+            echo "MTP Package detected."
+
+            if [ -f "testconfig.json" ]; then
+              MODE="mtp"
+              echo "Clean Break Mode: Found testconfig.json in ${{ inputs.src-folder }}"
+            else
+              echo "ERROR: MTP detected but 'testconfig.json' is missing in ${{ inputs.src-folder }}!"
+              echo ""
+              echo "Microsoft Best Practices for MTP require a 'testconfig.json' file to manage coverage and execution."
+              echo "This native JSON configuration eliminates CLI switch errors (MSB1001) and ensures local/CI parity."
+              echo ""
+              echo "Create ${{ inputs.src-folder }}/testconfig.json with coverage settings:"
+              echo "https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
+              exit 1
+            fi
+          else
+            MODE="legacy"
+            echo "No MTP indicators found - falling back to legacy Coverlet"
+          fi
+        fi
+
+        echo "mode=$MODE" >> $GITHUB_OUTPUT
+        echo "Testing mode: $MODE"
+
+    - name: Resolve Solution File
+      if: steps.detect-mode.outputs.mode == 'mtp'
+      id: resolve-solution
+      shell: bash
+      working-directory: ${{ inputs.src-folder }}
+      run: |
+        if [ -n "${{ inputs.solution-file }}" ]; then
+          echo "solution-arg=--solution ${{ inputs.solution-file }}" >> $GITHUB_OUTPUT
+        else
+          SLN_FILE=$(find . -maxdepth 1 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1)
+          if [ -n "$SLN_FILE" ]; then
+            echo "solution-arg=--solution $SLN_FILE" >> $GITHUB_OUTPUT
+          else
+            echo "solution-arg=" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+    - name: Tests + Coverage (MTP)
+      if: steps.detect-mode.outputs.mode == 'mtp'
+      shell: bash
+      working-directory: ${{ inputs.src-folder }}
+      run: |
+        VERBOSITY_ARGS=""
+        if [ "${{ inputs.enable-detailed-test-logging }}" == "true" ]; then
+          VERBOSITY_ARGS="--verbosity detailed --output Detailed"
+        fi
+
+        dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
+          --no-build \
+          --configuration ${{ inputs.configuration }} \
+          $VERBOSITY_ARGS \
+          --coverage \
+          --coverage-output-format cobertura \
+          --results-directory ./TestResults
+
+    - name: Tests + Coverage (Legacy Coverlet)
+      if: steps.detect-mode.outputs.mode == 'legacy'
+      uses: glennawatson/coverlet-msbuild@v2.1
+      with:
+        project-files: '${{ inputs.src-folder }}/${{ inputs.tests-project-glob }}'
+        no-build: true
+        exclude-filter: '[${{ inputs.product-namespace-prefix }}.*.Tests.*]*,[${{ inputs.product-namespace-prefix }}.Tests]*,[${{ inputs.product-namespace-prefix }}.TestRunner.*]*'
+        include-filter: '[${{ inputs.product-namespace-prefix }}*]*'
+        output-format: '"${{ inputs.coverage-formats }}"'
+        configuration: ${{ inputs.configuration }}
+
+    - name: Upload per-OS coverage
+      uses: actions/upload-artifact@v6
+      with:
+        name: tmp-coverage-${{ runner.os }}
+        path: |
+          ${{ inputs.src-folder }}/**/coverage.cobertura.xml
+          ${{ inputs.src-folder }}/**/coverage*.cobertura.xml
+          ${{ inputs.src-folder }}/**/TestResults/**/*.cobertura.xml
+        if-no-files-found: warn
+        retention-days: 3

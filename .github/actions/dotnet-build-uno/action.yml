@@ -1,0 +1,34 @@
+name: .NET Build (UNO)
+description: UNO/msbuild variant build and pack (Windows only)
+
+inputs:
+  configuration:
+    description: 'Build configuration'
+    required: false
+    default: 'Release'
+  src-folder:
+    description: 'Folder containing the solution'
+    required: false
+    default: 'src'
+  solution-file:
+    description: 'Solution file relative to src-folder'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: NuGet Restore
+      shell: bash
+      run: dotnet restore ${{ inputs.solution-file }}
+      working-directory: ${{ inputs.src-folder }}
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+      with:
+        vs-prerelease: true
+
+    - name: Build and Pack (msbuild)
+      shell: cmd
+      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solution-file }}
+      working-directory: ${{ inputs.src-folder }}

@@ -1,168 +1,174 @@
 name: Common .NET build and release workflow
 
+permissions:
+  contents: write
+
 on:
   workflow_call:
     inputs:
       configuration:
-        required: false
         type: string
         default: 'Release'
-        description: 'The build configuration. Eg debug/release'
+        description: 'Build configuration'
 
-      productNamespacePrefix:
-        required: true
+      dotnetVersions:
         type: string
-        description: 'The namespace prefix used to exclude unrelated items for code coverage'
-
-      useVisualStudioPreview:
-        required: false
-        default: false
-        type: boolean
-        description: 'If the Visual Studio preview edition is used'
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+        description: 'Newline-separated list of .NET SDKs'
 
       solutionFile:
-        required: false
         type: string
-        description: 'Optional name of a solution file founded in the srcFolder'
-        
+        description: 'Solution file relative to srcFolder'
+
       srcFolder:
-        required: false
         type: string
         default: 'src'
-        description: 'The folder where the source can be found'
-        
-      useNBGV:
-        required: false
-        default: true
-        type: boolean
-        description: 'If uses NBGV'
-        
-      createArtifacts:
-        required: false
-        default: true
-        type: boolean
-        description: 'If creates Artifacts'
+        description: 'Folder containing the solution'
 
-      installWorkflows:
-        required: false
-        default: true
+      useNBGV:
         type: boolean
-        description: 'If installs Workflows'
+        default: true
+        description: 'Run NBGV to stamp version variables'
+
+      installWorkloads:
+        type: boolean
+        default: false
+        description: 'Run dotnet workload restore'
+
+      useUNO:
+        type: boolean
+        default: false
+        description: 'Enable UNO-specific msbuild/pack flow (Windows only)'
+
+      publishToNuGet:
+        type: boolean
+        default: true
+        description: 'Push signed packages to nuget.org'
+
+      createRelease:
+        type: boolean
+        default: true
+        description: 'Create a GitHub Release tagged with NBGV SemVer2 version'
 
     secrets:
-      SIGN_ACCOUNT_NAME:
+      ES_USERNAME:
         required: true
-      SIGN_PROFILE_NAME:
+      ES_PASSWORD:
+        required: true
+      CREDENTIAL_ID:
+        required: true
+      ES_TOTP_SECRET:
         required: true
       NUGET_API_KEY:
-        required: true
-      AZURE_CLIENT_SECRET:
-        required: true
-      AZURE_TENANT_ID:
-        required: true
-      AZURE_CLIENT_ID:
-        required: true
-permissions:
-  id-token: write
-  contents: read
+        required: false
+
 jobs:
-  build-and-release:
+  # ============================
+  # BUILD (Windows)
+  # ============================
+  build:
     environment:
-      name: release 
-    runs-on: windows-2025
+      name: release
+    runs-on: windows-latest
     outputs:
-      nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
-    steps:        
-    - name: Get Latest Visual Studio Version
-      if: inputs.useVisualStudioPreview == true
-      shell: bash
-      run: |
-        dotnet tool update -g dotnet-vs
-        vs where release
-        vs update release Enterprise
-        vs modify release Enterprise +mobile +desktop +uwp +web
-        vs where release
+      nbgv: ${{ steps.environment.outputs.nbgv-semver2 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          lfs: true
 
-    - name: Checkout
-      uses: actions/checkout@v6
-      with:
-        fetch-depth: 0
-        lfs: true
+      - name: Setup .NET Environment
+        id: environment
+        uses: ./.github/actions/dotnet-environment
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+          use-nbgv: ${{ inputs.useNBGV }}
 
-    - name: Setup .NET 6/8
-      uses: actions/setup-dotnet@v5
-      with:
-        dotnet-version: |
-            6.0.x
-            8.0.x
+      - name: Build (dotnet)
+        if: inputs.useUNO == false
+        uses: ./.github/actions/dotnet-build
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          create-packages: 'true'
 
-    - name: Install DotNet workloads
-      if: inputs.installWorkflows == true
-      shell: bash
-      run: |
-        dotnet workload install android ios tvos macos maui maccatalyst
-                
-    - name: NBGV
-      if: inputs.useNBGV == true
-      id: nbgv
-      uses: dotnet/nbgv@master
-      with:
-        setAllVars: true
+      - name: Build (UNO)
+        if: inputs.useUNO == true
+        uses: ./.github/actions/dotnet-build-uno
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
 
-    - name: Install NuGet 
-      uses: nuget/setup-nuget@v2
-      with:
-        nuget-api-key: ${{ secrets.NuGetAPIKey }}
-        nuget-version: '6.x'
+      - name: Upload NuGet Packages
+        uses: actions/upload-artifact@v6
+        with:
+          name: nuget
+          path: '**/*.nupkg'
+          if-no-files-found: error
 
-    - name: NuGet Restore 
-      run: dotnet restore ${{ inputs.solutionFile }}
-      working-directory: ${{ inputs.srcFolder }}
+  # ============================
+  # SIGN + RELEASE (Linux)
+  # ============================
+  sign-and-release:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: release
+    steps:
+      - name: Download NuGet Packages
+        uses: actions/download-artifact@v7
+        with:
+          name: nuget
+          path: ./packages
 
-    - name: Build DotNet
-      run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
-      working-directory: ${{ inputs.srcFolder }}
+      - name: Sign packages with SSL.com eSigner
+        uses: SSLcom/esigner-codesign@v1.3.2
+        with:
+          command: batch_sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          dir_path: ./packages
+          output_path: ./signed
+          malware_block: false
+          environment_name: PROD
+          jvm_max_memory: 2048M
 
-    - name: Sign files with Trusted Signing
-      uses: azure/trusted-signing-action@v1.0.0
-      with:
-        azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-        endpoint: https://eus.codesigning.azure.net/
-        trusted-signing-account-name: ${{ secrets.SIGN_ACCOUNT_NAME }}
-        certificate-profile-name: ${{ secrets.SIGN_PROFILE_NAME }}
-        files-folder: ${{ github.workspace }}
-        files-folder-filter: nupkg
-        files-folder-recurse: true
-        file-digest: SHA256
-        timestamp-rfc3161: http://timestamp.acs.microsoft.com
-        timestamp-digest: SHA256
-          
-    - name: Create NuGet Artifacts
-      if: inputs.createArtifacts == true
-      uses: actions/upload-artifact@master
-      with:
-        name: nuget
-        path: '**/*.nupkg'
-        
-    # - name: Changelog
-    #   uses: glennawatson/ChangeLog@v1
-    #   id: changelog
+      - name: Upload Signed Packages
+        uses: actions/upload-artifact@v6
+        with:
+          name: signed-nuget
+          path: ./signed/*.nupkg
+          if-no-files-found: error
 
-    # - name: Create Release
-    #   uses: actions/create-release@v1.1.4
-    #   env:
-    #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
-    #   with:
-    #       tag_name: ${{ steps.nbgv.outputs.SemVer2 }}
-    #       release_name: ${{ steps.nbgv.outputs.SemVer2 }}
-    #       body: |
-    #         ${{ steps.changelog.outputs.commitLog }}
-            
-    # - name: NuGet Push
-    #   env:
-    #     NUGET_AUTH_TOKEN: ${{ secrets.NUGET_API_KEY }}
-    #     SOURCE_URL: https://api.nuget.org/v3/index.json
-    #   run: |
-    #     dotnet nuget push -s ${{ env.SOURCE_URL }} -k ${{ env.NUGET_AUTH_TOKEN }} **/*.nupkg        
+      - name: Setup .NET
+        if: inputs.publishToNuGet == true
+        uses: actions/setup-dotnet@v5
+
+      - name: Push to NuGet
+        if: inputs.publishToNuGet == true
+        shell: bash
+        run: |
+          for pkg in ./signed/*.nupkg; do
+            dotnet nuget push "$pkg" --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }}
+          done
+
+      - name: Create GitHub Release
+        if: inputs.createRelease == true
+        uses: actions/create-release@v1.1.4
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tag_name: ${{ needs.build.outputs.nbgv }}
+          release_name: ${{ needs.build.outputs.nbgv }}

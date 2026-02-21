@@ -33,7 +33,7 @@ on:
       solutionFile:
         type: string
         description: 'Solution file relative to srcFolder'
-        
+
       srcFolder:
         type: string
         default: 'src'
@@ -48,7 +48,7 @@ on:
         type: boolean
         default: true
         description: 'Run NBGV to stamp version variables'
-        
+
       createArtifacts:
         type: boolean
         default: true
@@ -103,7 +103,7 @@ on:
       NuGetAPIKey:
         required: false
       CODECOV_TOKEN:
-        required: true
+        required: false
 
 jobs:
   # ============================
@@ -114,7 +114,7 @@ jobs:
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
     outputs:
-      nbgv: ${{ steps.nbgv.outputs.SemVer2 }}
+      nbgv: ${{ steps.environment.outputs.nbgv-semver2 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -122,183 +122,45 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Setup .NET (with NuGet cache)
-        uses: actions/setup-dotnet@v5
+      - name: Setup .NET Environment
+        id: environment
+        uses: ./.github/actions/dotnet-environment
         with:
-          dotnet-version: ${{ inputs.dotnetVersions }}
-          #dotnet-quality: 'preview'
-          cache: true
-          cache-dependency-path: |
-            **/Directory.Packages.props
-            **/*.csproj
-            **/global.json
-            **/nuget.config
-
-      - name: Cache NuGet HTTP (v3)
-        uses: actions/cache@v5
-        with:
-          path: |
-            %LOCALAPPDATA%\NuGet\v3-cache        
-          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nugetv3-
-
-#      - name: Get Latest Visual Studio Version
-#        if: inputs.useUNO == true
-#        shell: bash
-#        run: |
-#          echo "Downloading Visual Studio 2026 Insiders bootstrapper..."
-#          curl -L -o vs_enterprise.exe "https://aka.ms/vs/18/insider/vs_enterprise.exe"
-
-#          echo "Starting Visual Studio 2026 Insiders installation..."
-#          ./vs_enterprise.exe --wait \
-#            --add Microsoft.VisualStudio.Workload.NetCrossPlat \
-#            --add Microsoft.VisualStudio.Workload.ManagedDesktop \
-#            --add Microsoft.VisualStudio.Workload.Universal \
-#            --add Microsoft.VisualStudio.Workload.NetWeb \
-#            --quiet \
-#            --installPath "C:\Program Files\Microsoft Visual Studio\2026\Enterprise"
-
-#          echo "Visual Studio installation complete."
-
-      - name: Restore .NET Workloads
-        if: inputs.installWorkloads == true
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          if [ -n "${{ inputs.solutionFile }}" ]; then
-            dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
-          else
-            dotnet workload restore --skip-manifest-update
-          fi
-
-      - name: NBGV
-        if: inputs.useNBGV == true
-        id: nbgv
-        uses: dotnet/nbgv@master
-        with:
-          setAllVars: true
-
-      - name: NuGet Restore
-        run: dotnet restore ${{ inputs.solutionFile }}
-        working-directory: ${{ inputs.srcFolder }}
-
-      - name: Add MSBuild to PATH (UNO)
-        if: inputs.useUNO == true
-        uses: microsoft/setup-msbuild@v2
-        with:
-          vs-prerelease: true
-
-      - name: Build (msbuild)
-        if: inputs.useUNO == true
-        run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solutionFile }}
-        working-directory: ${{ inputs.srcFolder }}
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+          use-nbgv: ${{ inputs.useNBGV }}
 
       - name: Build (dotnet)
         if: inputs.useUNO == false
-        run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
-        working-directory: ${{ inputs.srcFolder }}
-
-      - name: Pack (dotnet)
-        if: inputs.useUNO == false
-        run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }} --m:1
-        working-directory: ${{ inputs.srcFolder }}
-
-      - name: Detect Testing Mode
-        if: inputs.performTests == true
-        id: detect-mode
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          MODE="${{ inputs.testingMode }}"
-
-          if [ "$MODE" == "auto" ]; then
-            echo "🔍 Auto-detecting testing platform in ${{ inputs.srcFolder }}..."
-
-            # Check for MTP indicator (the coverage package)
-            if grep -r "Microsoft.Testing.Extensions.CodeCoverage" . --include="*.props" --include="*.targets" --include="*.csproj" > /dev/null 2>&1; then
-              echo "✅ MTP Package detected."
-
-              # Enforce CLEAN BREAK: Native JSON config must exist in the source folder
-              if [ -f "testconfig.json" ]; then
-                MODE="mtp"
-                echo "🚀 Clean Break Mode: Found testconfig.json in ${{ inputs.srcFolder }}"
-              else
-                echo "❌ ERROR: MTP detected but 'testconfig.json' is missing in ${{ inputs.srcFolder }}!"
-                echo ""
-                echo "Microsoft Best Practices for MTP require a 'testconfig.json' file to manage coverage and execution."
-                echo "This native JSON configuration eliminates CLI switch errors (MSB1001) and ensures local/CI parity."
-                echo ""
-                echo "Create ${{ inputs.srcFolder }}/testconfig.json with coverage settings:"
-                echo "https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
-                exit 1
-              fi
-            else
-              MODE="legacy"
-              echo "⚠️  No MTP indicators found - falling back to legacy Coverlet"
-            fi
-          fi
-
-          echo "mode=$MODE" >> $GITHUB_OUTPUT
-          echo "📋 Testing mode: $MODE"
-
-      - name: Resolve Solution File
-        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
-        id: resolve-solution
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          if [ -n "${{ inputs.solutionFile }}" ]; then
-            echo "solution-arg=--solution ${{ inputs.solutionFile }}" >> $GITHUB_OUTPUT
-          else
-            SLN_FILE=$(find . -maxdepth 1 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1)
-            if [ -n "$SLN_FILE" ]; then
-              echo "solution-arg=--solution $SLN_FILE" >> $GITHUB_OUTPUT
-            else
-              echo "solution-arg=" >> $GITHUB_OUTPUT
-            fi
-          fi
-
-      - name: Tests + Coverage (MTP)
-        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          VERBOSITY_ARGS=""
-          if [ "${{ inputs.enableDetailedTestLogging }}" == "true" ]; then
-            VERBOSITY_ARGS="--verbosity detailed --output Detailed"
-          fi
-
-          dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
-            --no-build \
-            --configuration ${{ inputs.configuration }} \
-            $VERBOSITY_ARGS \
-            --coverage \
-            --coverage-output-format cobertura \
-            --results-directory ./TestResults
-
-      - name: Tests + Coverage (Legacy Coverlet)
-        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'legacy'
-        uses: glennawatson/coverlet-msbuild@v2.1
+        uses: ./.github/actions/dotnet-build
         with:
-          project-files: '${{ inputs.srcFolder }}/${{ inputs.testsProjectGlob }}'
-          no-build: true
-          exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
-          include-filter: '[${{inputs.productNamespacePrefix}}*]*'
-          output-format: '"${{ inputs.coverageFormats }}"'
           configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          create-packages: 'true'
 
-      - name: Upload per-OS coverage (Windows → temp)
-        if: inputs.performTests == true
-        uses: actions/upload-artifact@v6
+      - name: Build (UNO)
+        if: inputs.useUNO == true
+        uses: ./.github/actions/dotnet-build-uno
         with:
-          name: tmp-coverage-${{ runner.os }}
-          path: |
-            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
-            ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
-            ${{ inputs.srcFolder }}/**/TestResults/**/*.cobertura.xml
-          if-no-files-found: warn
-          retention-days: 3
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+
+      - name: Test
+        if: inputs.performTests == true
+        uses: ./.github/actions/dotnet-test
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          testing-mode: ${{ inputs.testingMode }}
+          tests-project-glob: ${{ inputs.testsProjectGlob }}
+          coverage-formats: ${{ inputs.coverageFormats }}
+          product-namespace-prefix: ${{ inputs.productNamespacePrefix }}
+          enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
 
       - name: Upload NuGet Packages
         if: inputs.createArtifacts == true
@@ -317,11 +179,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        include:
-          - os: macos-latest
-            restore-prefix: sudo
-          - os: ubuntu-latest
-            restore-prefix: ''
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
     steps:
@@ -330,138 +187,36 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup .NET (with NuGet cache)
-        uses: actions/setup-dotnet@v5
+      - name: Setup .NET Environment
+        id: environment
+        uses: ./.github/actions/dotnet-environment
         with:
-          dotnet-version: ${{ inputs.dotnetVersions }}
-          cache: true
-          cache-dependency-path: |
-            **/Directory.Packages.props
-            **/*.csproj
-            **/global.json
-            **/nuget.config
-
-      - name: Cache NuGet HTTP (v3)
-        uses: actions/cache@v5
-        with:
-          path: ~/.local/share/NuGet/v3-cache
-          key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nugetv3-
-
-      - name: Restore .NET Workloads
-        if: inputs.installWorkloads == true
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          if [ -n "${{ inputs.solutionFile }}" ]; then
-            ${{ matrix.restore-prefix }} dotnet workload restore --skip-manifest-update --project "${{ inputs.solutionFile }}"
-          else
-            ${{ matrix.restore-prefix }} dotnet workload restore --skip-manifest-update
-          fi
-
-      - name: Restore
-        run: dotnet restore ${{ inputs.solutionFile }}
-        working-directory: ${{ inputs.srcFolder }}
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+          use-nbgv: ${{ inputs.useNBGV }}
 
       - name: Build
-        run: dotnet build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }}
-        working-directory: ${{ inputs.srcFolder }}
-
-      - name: Detect Testing Mode
-        if: inputs.performTests == true
-        id: detect-mode
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          MODE="${{ inputs.testingMode }}"
-
-          if [ "$MODE" == "auto" ]; then
-            echo "🔍 Auto-detecting testing platform in ${{ inputs.srcFolder }}..."
-
-            # Check for MTP indicator (the coverage package)
-            if grep -r "Microsoft.Testing.Extensions.CodeCoverage" . --include="*.props" --include="*.targets" --include="*.csproj" > /dev/null 2>&1; then
-              echo "✅ MTP Package detected."
-
-              # Enforce CLEAN BREAK: Native JSON config must exist in the source folder
-              if [ -f "testconfig.json" ]; then
-                MODE="mtp"
-                echo "🚀 Clean Break Mode: Found testconfig.json in ${{ inputs.srcFolder }}"
-              else
-                echo "❌ ERROR: MTP detected but 'testconfig.json' is missing in ${{ inputs.srcFolder }}!"
-                echo ""
-                echo "Microsoft Best Practices for MTP require a 'testconfig.json' file to manage coverage and execution."
-                echo "This native JSON configuration eliminates CLI switch errors (MSB1001) and ensures local/CI parity."
-                echo ""
-                echo "Create ${{ inputs.srcFolder }}/testconfig.json with coverage settings:"
-                echo "https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
-                exit 1
-              fi
-            else
-              MODE="legacy"
-              echo "⚠️  No MTP indicators found - falling back to legacy Coverlet"
-            fi
-          fi
-
-          echo "mode=$MODE" >> $GITHUB_OUTPUT
-          echo "📋 Testing mode: $MODE"
-
-      - name: Resolve Solution File
-        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
-        id: resolve-solution
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          if [ -n "${{ inputs.solutionFile }}" ]; then
-            echo "solution-arg=--solution ${{ inputs.solutionFile }}" >> $GITHUB_OUTPUT
-          else
-            SLN_FILE=$(find . -maxdepth 1 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1)
-            if [ -n "$SLN_FILE" ]; then
-              echo "solution-arg=--solution $SLN_FILE" >> $GITHUB_OUTPUT
-            else
-              echo "solution-arg=" >> $GITHUB_OUTPUT
-            fi
-          fi
-
-      - name: Tests + Coverage (MTP)
-        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'mtp'
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        run: |
-          VERBOSITY_ARGS=""
-          if [ "${{ inputs.enableDetailedTestLogging }}" == "true" ]; then
-            VERBOSITY_ARGS="--verbosity detailed --output Detailed"
-          fi
-
-          dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
-            --no-build \
-            --configuration ${{ inputs.configuration }} \
-            $VERBOSITY_ARGS \
-            --coverage \
-            --coverage-output-format cobertura \
-            --results-directory ./TestResults
-
-      - name: Tests + Coverage (Legacy Coverlet)
-        if: inputs.performTests == true && steps.detect-mode.outputs.mode == 'legacy'
-        uses: glennawatson/coverlet-msbuild@v2.1
+        uses: ./.github/actions/dotnet-build
         with:
-          project-files: '${{ inputs.srcFolder }}/${{ inputs.testsProjectGlob }}'
-          no-build: true
-          exclude-filter: '[${{inputs.productNamespacePrefix}}.*.Tests.*]*,[${{inputs.productNamespacePrefix}}.Tests]*,[${{inputs.productNamespacePrefix}}.TestRunner.*]*'
-          include-filter: '[${{inputs.productNamespacePrefix}}*]*'
-          output-format: '"${{ inputs.coverageFormats }}"'
           configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          create-packages: 'false'
 
-      - name: Upload per-OS coverage (temp)
+      - name: Test
         if: inputs.performTests == true
-        uses: actions/upload-artifact@v6
+        uses: ./.github/actions/dotnet-test
         with:
-          name: tmp-coverage-${{ runner.os }}
-          path: |
-            ${{ inputs.srcFolder }}/**/coverage.cobertura.xml
-            ${{ inputs.srcFolder }}/**/coverage*.cobertura.xml
-            ${{ inputs.srcFolder }}/**/TestResults/**/*.cobertura.xml
-          if-no-files-found: warn
-          retention-days: 3
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          testing-mode: ${{ inputs.testingMode }}
+          tests-project-glob: ${{ inputs.testsProjectGlob }}
+          coverage-formats: ${{ inputs.coverageFormats }}
+          product-namespace-prefix: ${{ inputs.productNamespacePrefix }}
+          enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
 
   # ============================
   # COLLECTOR (waits for all) — uploads once + Codecov
@@ -501,7 +256,7 @@ jobs:
           # Collect all cobertura files and upload in a single command
           FILES=$(find ./.collect -name '*.cobertura.xml' -type f | sed 's/^/--file /' | tr '\n' ' ')
           codecov-cli upload-coverage $FILES
-          
+
       - name: Cleanup per-OS temp artifacts
         continue-on-error: true
         if: inputs.cleanupPerOsArtifacts == true
