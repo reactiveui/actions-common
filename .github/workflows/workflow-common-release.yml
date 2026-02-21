@@ -84,7 +84,7 @@ jobs:
 
       - name: Setup .NET Environment
         id: environment
-        uses: ./.github/actions/dotnet-environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
         with:
           dotnet-versions: ${{ inputs.dotnetVersions }}
           src-folder: ${{ inputs.srcFolder }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: Build (dotnet)
         if: inputs.useUNO == false
-        uses: ./.github/actions/dotnet-build
+        uses: reactiveui/actions-common/.github/actions/dotnet-build@main
         with:
           configuration: ${{ inputs.configuration }}
           src-folder: ${{ inputs.srcFolder }}
@@ -103,7 +103,7 @@ jobs:
 
       - name: Build (UNO)
         if: inputs.useUNO == true
-        uses: ./.github/actions/dotnet-build-uno
+        uses: reactiveui/actions-common/.github/actions/dotnet-build-uno@main
         with:
           configuration: ${{ inputs.configuration }}
           src-folder: ${{ inputs.srcFolder }}
