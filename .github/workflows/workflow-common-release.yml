@@ -73,14 +73,12 @@ on:
 
 jobs:
   # ============================
-  # BUILD (Windows)
+  # BUILD + SIGN + RELEASE (Windows)
   # ============================
-  build:
+  build-sign-release:
     environment:
       name: release
     runs-on: windows-latest
-    outputs:
-      nbgv: ${{ steps.environment.outputs.nbgv-semver2 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -105,7 +103,7 @@ jobs:
           configuration: ${{ inputs.configuration }}
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
-          create-packages: 'true'
+          create-packages: 'false'
 
       - name: Build (UNO)
         if: inputs.useUNO == true
@@ -115,24 +113,10 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
 
-      - name: Upload NuGet Packages
-        uses: actions/upload-artifact@v6
-        with:
-          name: nuget
-          path: '**/*.nupkg'
-          if-no-files-found: error
-
-  # ============================
-  # SIGN + RELEASE (Linux)
-  # ============================
-  sign-and-release:
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: release
-    steps:
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+      - name: Pack NuGet packages
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        run: dotnet pack --no-build --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }} -o "${GITHUB_WORKSPACE}/packages"
 
       - name: Install GitReleaseNoteGenerator
         if: inputs.createRelease == true
@@ -142,13 +126,7 @@ jobs:
         if: inputs.createRelease == true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: git-release-notes --release-version "${{ needs.build.outputs.nbgv }}" --output-file "${{ github.workspace }}/release-notes.md"
-
-      - name: Download NuGet Packages
-        uses: actions/download-artifact@v7
-        with:
-          name: nuget
-          path: ./packages
+        run: git-release-notes --release-version "${{ steps.environment.outputs.nbgv-semver2 }}" --output-file release-notes.md
 
       - name: Sign packages with SSL.com eSigner
         uses: SSLcom/esigner-codesign@v1.3.2
@@ -158,9 +136,9 @@ jobs:
           password: ${{ secrets.ES_PASSWORD }}
           credential_id: ${{ secrets.CREDENTIAL_ID }}
           totp_secret: ${{ secrets.ES_TOTP_SECRET }}
-          dir_path: ./packages
-          output_path: ./signed
-          malware_block: false
+          dir_path: packages
+          output_path: signed
+          malware_block: true
           environment_name: PROD
           jvm_max_memory: 2048M
 
@@ -168,7 +146,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: signed-nuget
-          path: ./signed/*.nupkg
+          path: signed/*.nupkg
           if-no-files-found: error
 
       - name: NuGet login (OIDC trusted publishing)
@@ -182,7 +160,7 @@ jobs:
         if: inputs.publishToNuGet == true
         shell: bash
         run: |
-          for pkg in ./signed/*.nupkg; do
+          for pkg in signed/*.nupkg; do
             dotnet nuget push "$pkg" --source https://api.nuget.org/v3/index.json --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           done
 
@@ -190,4 +168,4 @@ jobs:
         if: inputs.createRelease == true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ needs.build.outputs.nbgv }}" --repo "${{ github.repository }}" --title "${{ needs.build.outputs.nbgv }}" --notes-file "${{ github.workspace }}/release-notes.md"
+        run: gh release create "${{ steps.environment.outputs.nbgv-semver2 }}" --repo "${{ github.repository }}" --title "${{ steps.environment.outputs.nbgv-semver2 }}" --notes-file release-notes.md
