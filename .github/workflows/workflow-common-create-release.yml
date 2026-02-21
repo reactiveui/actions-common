@@ -18,6 +18,12 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
+      - name: Download signed packages
+        uses: actions/download-artifact@v6
+        with:
+          name: signed-nuget
+          path: ./signed
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
 
@@ -32,4 +38,4 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ inputs.version }}" --repo "${{ github.repository }}" --title "${{ inputs.version }}" --notes-file release-notes.md
+        run: gh release create "${{ inputs.version }}" --repo "${{ github.repository }}" --title "${{ inputs.version }}" --notes-file release-notes.md ./signed/*.nupkg
