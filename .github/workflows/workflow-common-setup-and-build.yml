@@ -166,7 +166,7 @@ jobs:
 
       - name: Upload NuGet Packages
         if: inputs.createArtifacts == true
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: nuget
           path: '**/*.nupkg'
@@ -236,13 +236,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download temp coverage artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: tmp-coverage-*
           path: ./.collect
 
       - name: Upload raw coverage reports (for debugging)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.mergedCoverageArtifactName }}
           path: ./.collect

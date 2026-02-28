@@ -126,7 +126,7 @@ jobs:
           jvm_max_memory: 2048M
 
       - name: Upload Signed Packages
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: signed-nuget
           path: signed/*.nupkg
