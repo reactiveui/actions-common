@@ -119,7 +119,7 @@ runs:
         configuration: ${{ inputs.configuration }}
 
     - name: Upload per-OS coverage reports as build artifacts
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: tmp-coverage-${{ runner.os }}
         path: |
