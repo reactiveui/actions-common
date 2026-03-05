@@ -77,6 +77,6 @@ runs:
     - name: Stamp version with Nerdbank.GitVersioning
       if: inputs.use-nbgv == 'true'
       id: nbgv
-      uses: dotnet/nbgv@v0.4.2
+      uses: dotnet/nbgv@v0.5.1
       with:
         setAllVars: true
