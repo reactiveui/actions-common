@@ -40,6 +40,11 @@ on:
         default: true
         description: 'Run CodeQL C# analysis with manual build'
 
+      csharpRunsOn:
+        type: string
+        default: 'windows-latest'
+        description: 'Runner for C# analysis (use windows-latest for projects with Windows-specific targets)'
+
       analyzeActions:
         type: boolean
         default: true
@@ -54,7 +59,7 @@ jobs:
   analyze-csharp:
     name: Analyze C#
     if: inputs.analyzeCSharp
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.csharpRunsOn }}
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
 
