@@ -1,0 +1,131 @@
+name: Common CodeQL Analysis
+
+permissions:
+  security-events: write
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+        description: 'Newline-separated list of .NET SDK versions'
+
+      srcFolder:
+        type: string
+        default: 'src'
+        description: 'Folder containing the solution'
+
+      solutionFile:
+        type: string
+        default: ''
+        description: 'Solution file relative to srcFolder'
+
+      configuration:
+        type: string
+        default: 'Release'
+        description: 'Build configuration'
+
+      installWorkloads:
+        type: boolean
+        default: false
+        description: 'Run workload restore before build'
+
+      analyzeCSharp:
+        type: boolean
+        default: true
+        description: 'Run CodeQL C# analysis with manual build'
+
+      analyzeActions:
+        type: boolean
+        default: true
+        description: 'Run CodeQL GitHub Actions analysis'
+
+      analyzeJavaScript:
+        type: boolean
+        default: false
+        description: 'Run CodeQL JavaScript/TypeScript analysis'
+
+jobs:
+  analyze-csharp:
+    name: Analyze C#
+    if: inputs.analyzeCSharp
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET Environment
+      uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+      with:
+        dotnet-versions: ${{ inputs.dotnetVersions }}
+        src-folder: ${{ inputs.srcFolder }}
+        solution-file: ${{ inputs.solutionFile }}
+        install-workloads: ${{ inputs.installWorkloads && 'true' || 'false' }}
+        use-nbgv: 'false'
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: csharp
+        build-mode: manual
+
+    - name: Build
+      uses: reactiveui/actions-common/.github/actions/dotnet-build@main
+      with:
+        configuration: ${{ inputs.configuration }}
+        src-folder: ${{ inputs.srcFolder }}
+        solution-file: ${{ inputs.solutionFile }}
+        create-packages: 'false'
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:csharp"
+
+  analyze-actions:
+    name: Analyze GitHub Actions
+    if: inputs.analyzeActions
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: actions
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:actions"
+
+  analyze-javascript:
+    name: Analyze JavaScript
+    if: inputs.analyzeJavaScript
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v6
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: javascript-typescript
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:javascript-typescript"
