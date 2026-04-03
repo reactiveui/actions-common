@@ -64,20 +64,16 @@ runs:
       shell: bash
       working-directory: ${{ inputs.src-folder }}
       run: |
-        PREFIX=""
-        if [ "$RUNNER_OS" == "macOS" ]; then
-          PREFIX="sudo"
-        fi
         # Determine the solution/project file to pass to workload restore.
         # If explicitly provided use that, otherwise auto-detect .slnx/.sln in the working directory.
         TARGET="${{ inputs.solution-file }}"
         if [ -z "$TARGET" ]; then
-          TARGET=$(ls *.slnx *.sln 2>/dev/null | head -n1)
+          TARGET=$(find . -maxdepth 1 \( -name '*.slnx' -o -name '*.sln' \) -print -quit)
         fi
         if [ -n "$TARGET" ]; then
-          $PREFIX dotnet workload restore "$TARGET" --from-previous-sdk --skip-manifest-update
+          dotnet workload restore "$TARGET" --from-previous-sdk --skip-manifest-update
         else
-          $PREFIX dotnet workload restore --from-previous-sdk --skip-manifest-update
+          dotnet workload restore --from-previous-sdk --skip-manifest-update
         fi
 
     - name: Stamp version with Nerdbank.GitVersioning
