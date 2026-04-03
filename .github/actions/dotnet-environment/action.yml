@@ -69,7 +69,7 @@ runs:
           PREFIX="sudo"
         fi
         if [ -n "${{ inputs.solution-file }}" ]; then
-          $PREFIX dotnet workload restore --from-previous-sdk --skip-manifest-update --project "${{ inputs.solution-file }}"
+          $PREFIX dotnet workload restore "${{ inputs.solution-file }}" --from-previous-sdk --skip-manifest-update
         else
           $PREFIX dotnet workload restore --from-previous-sdk --skip-manifest-update
         fi
