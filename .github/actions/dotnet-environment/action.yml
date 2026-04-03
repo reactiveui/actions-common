@@ -69,9 +69,9 @@ runs:
           PREFIX="sudo"
         fi
         if [ -n "${{ inputs.solution-file }}" ]; then
-          $PREFIX dotnet workload restore --skip-manifest-update --project "${{ inputs.solution-file }}"
+          $PREFIX dotnet workload restore --from-previous-sdk --skip-manifest-update --project "${{ inputs.solution-file }}"
         else
-          $PREFIX dotnet workload restore --skip-manifest-update
+          $PREFIX dotnet workload restore --from-previous-sdk --skip-manifest-update
         fi
 
     - name: Stamp version with Nerdbank.GitVersioning
