@@ -3,6 +3,8 @@ name: Common CodeQL Analysis
 permissions:
   security-events: write
   contents: read
+  packages: read
+  actions: read
 
 on:
   workflow_call:
@@ -83,6 +85,7 @@ jobs:
       with:
         languages: csharp
         build-mode: manual
+        queries: security-extended
 
     - name: Build
       uses: reactiveui/actions-common/.github/actions/dotnet-build@main
@@ -110,6 +113,7 @@ jobs:
       uses: github/codeql-action/init@v4
       with:
         languages: actions
+        queries: security-extended
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
@@ -129,6 +133,7 @@ jobs:
       uses: github/codeql-action/init@v4
       with:
         languages: javascript-typescript
+        queries: security-extended
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
