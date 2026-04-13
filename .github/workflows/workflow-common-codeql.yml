@@ -70,6 +70,7 @@ jobs:
       uses: actions/checkout@v6
       with:
         fetch-depth: 0
+        lfs: true
 
     - name: Setup .NET Environment
       uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
