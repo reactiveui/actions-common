@@ -53,7 +53,7 @@ jobs:
   # BUILD + PACK (no signing)
   # ============================
   build-release:
-    runs-on: ${{ inputs.useUNO && 'windows-latest' || 'ubuntu-latest' }}
+    runs-on: windows-latest
     outputs:
       semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
     steps:
