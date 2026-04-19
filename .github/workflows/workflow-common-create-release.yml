@@ -11,6 +11,11 @@ on:
         required: true
         description: 'Version string used for the release tag, title, and release notes heading'
 
+      artifactName:
+        type: string
+        default: 'signed-nuget'
+        description: 'Name of the artifact containing .nupkg files to attach to the release'
+
 jobs:
   # ============================
   # CREATE GITHUB RELEASE (Linux)
@@ -18,10 +23,10 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Download signed packages
+      - name: Download packages
         uses: actions/download-artifact@v8
         with:
-          name: signed-nuget
+          name: ${{ inputs.artifactName }}
           path: ./signed
 
       - name: Setup .NET

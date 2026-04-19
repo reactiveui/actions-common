@@ -1,0 +1,39 @@
+name: Common publish to GitHub Packages workflow
+
+permissions:
+  packages: write
+
+on:
+  workflow_call:
+    inputs:
+      artifactName:
+        type: string
+        default: 'nuget-packages'
+        description: 'Name of the artifact containing .nupkg files to publish'
+
+jobs:
+  # ============================
+  # PUBLISH TO GITHUB PACKAGES
+  # ============================
+  publish-github-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifactName }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+
+      - name: Push to GitHub Packages
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          for pkg in *.nupkg; do
+            dotnet nuget push "$pkg" \
+              --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+              --api-key "$GITHUB_TOKEN" \
+              --skip-duplicate
+          done

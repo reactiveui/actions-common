@@ -1,0 +1,103 @@
+name: Common .NET build and release workflow (unsigned)
+
+permissions:
+  contents: write
+
+on:
+  workflow_call:
+    inputs:
+      configuration:
+        type: string
+        default: 'Release'
+        description: 'Build configuration'
+
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+        description: 'Newline-separated list of .NET SDKs'
+
+      solutionFile:
+        type: string
+        description: 'Solution file relative to srcFolder'
+
+      srcFolder:
+        type: string
+        default: 'src'
+        description: 'Folder containing the solution'
+
+      useNBGV:
+        type: boolean
+        default: true
+        description: 'Run NBGV to stamp version variables'
+
+      installWorkloads:
+        type: boolean
+        default: false
+        description: 'Run dotnet workload restore'
+
+      useUNO:
+        type: boolean
+        default: false
+        description: 'Enable UNO-specific msbuild/pack flow (Windows only)'
+
+    outputs:
+      semver2:
+        description: 'The NBGV SemVer2 version string'
+        value: ${{ jobs.build-release.outputs.semver2 }}
+
+jobs:
+  # ============================
+  # BUILD + PACK (no signing)
+  # ============================
+  build-release:
+    runs-on: ${{ inputs.useUNO && 'windows-latest' || 'ubuntu-latest' }}
+    outputs:
+      semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Setup .NET Environment
+        id: environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+          use-nbgv: ${{ inputs.useNBGV }}
+
+      - name: Build (dotnet)
+        if: inputs.useUNO == false
+        uses: reactiveui/actions-common/.github/actions/dotnet-build@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          create-packages: 'false'
+
+      - name: Build (UNO)
+        if: inputs.useUNO == true
+        uses: reactiveui/actions-common/.github/actions/dotnet-build-uno@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+
+      - name: Pack NuGet packages
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }} -o "${GITHUB_WORKSPACE}/packages"
+
+      - name: Upload Packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: packages/*.nupkg
+          if-no-files-found: error
