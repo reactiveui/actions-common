@@ -1,40 +1,40 @@
 name: Nerdbank.GitVersioning
-description: Install the nbgv dotnet global tool and stamp NBGV_* cloud variables for the current commit.
+description: Install the nbgv dotnet global tool and stamp NBGV_* cloud variables and step outputs for the current commit.
 
 outputs:
   SemVer2:
     description: 'NBGV SemVer2 version string'
-    value: ${{ env.NBGV_SemVer2 }}
+    value: ${{ steps.outputs.outputs.SemVer2 }}
   SimpleVersion:
     description: 'NBGV SimpleVersion'
-    value: ${{ env.NBGV_SimpleVersion }}
+    value: ${{ steps.outputs.outputs.SimpleVersion }}
   AssemblyVersion:
     description: 'NBGV AssemblyVersion'
-    value: ${{ env.NBGV_AssemblyVersion }}
+    value: ${{ steps.outputs.outputs.AssemblyVersion }}
   AssemblyFileVersion:
     description: 'NBGV AssemblyFileVersion'
-    value: ${{ env.NBGV_AssemblyFileVersion }}
+    value: ${{ steps.outputs.outputs.AssemblyFileVersion }}
   AssemblyInformationalVersion:
     description: 'NBGV AssemblyInformationalVersion'
-    value: ${{ env.NBGV_AssemblyInformationalVersion }}
+    value: ${{ steps.outputs.outputs.AssemblyInformationalVersion }}
   NuGetPackageVersion:
     description: 'NBGV NuGetPackageVersion'
-    value: ${{ env.NBGV_NuGetPackageVersion }}
+    value: ${{ steps.outputs.outputs.NuGetPackageVersion }}
   ChocolateyPackageVersion:
     description: 'NBGV ChocolateyPackageVersion'
-    value: ${{ env.NBGV_ChocolateyPackageVersion }}
+    value: ${{ steps.outputs.outputs.ChocolateyPackageVersion }}
   NpmPackageVersion:
     description: 'NBGV NpmPackageVersion'
-    value: ${{ env.NBGV_NpmPackageVersion }}
+    value: ${{ steps.outputs.outputs.NpmPackageVersion }}
   GitCommitId:
     description: 'NBGV GitCommitId'
-    value: ${{ env.NBGV_GitCommitId }}
+    value: ${{ steps.outputs.outputs.GitCommitId }}
   GitCommitIdShort:
     description: 'NBGV GitCommitIdShort'
-    value: ${{ env.NBGV_GitCommitIdShort }}
+    value: ${{ steps.outputs.outputs.GitCommitIdShort }}
   VersionHeight:
     description: 'NBGV VersionHeight'
-    value: ${{ env.NBGV_VersionHeight }}
+    value: ${{ steps.outputs.outputs.VersionHeight }}
 
 runs:
   using: composite
@@ -50,3 +50,21 @@ runs:
     - name: Set NBGV_* cloud variables
       shell: bash
       run: nbgv cloud -a
+
+    - name: Expose NBGV values as step outputs
+      id: outputs
+      shell: bash
+      run: |
+        {
+          echo "SemVer2=${NBGV_SemVer2}"
+          echo "SimpleVersion=${NBGV_SimpleVersion}"
+          echo "AssemblyVersion=${NBGV_AssemblyVersion}"
+          echo "AssemblyFileVersion=${NBGV_AssemblyFileVersion}"
+          echo "AssemblyInformationalVersion=${NBGV_AssemblyInformationalVersion}"
+          echo "NuGetPackageVersion=${NBGV_NuGetPackageVersion}"
+          echo "ChocolateyPackageVersion=${NBGV_ChocolateyPackageVersion}"
+          echo "NpmPackageVersion=${NBGV_NpmPackageVersion}"
+          echo "GitCommitId=${NBGV_GitCommitId}"
+          echo "GitCommitIdShort=${NBGV_GitCommitIdShort}"
+          echo "VersionHeight=${NBGV_VersionHeight}"
+        } >> "$GITHUB_OUTPUT"
