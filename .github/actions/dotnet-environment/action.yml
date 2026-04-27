@@ -79,4 +79,4 @@ runs:
     - name: Stamp version with Nerdbank.GitVersioning
       if: inputs.use-nbgv == 'true'
       id: nbgv
-      uses: ./.github/actions/nbgv
+      uses: reactiveui/actions-common/.github/actions/nbgv@main
