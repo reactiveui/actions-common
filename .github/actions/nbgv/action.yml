@@ -1,0 +1,52 @@
+name: Nerdbank.GitVersioning
+description: Install the nbgv dotnet global tool and stamp NBGV_* cloud variables for the current commit.
+
+outputs:
+  SemVer2:
+    description: 'NBGV SemVer2 version string'
+    value: ${{ env.NBGV_SemVer2 }}
+  SimpleVersion:
+    description: 'NBGV SimpleVersion'
+    value: ${{ env.NBGV_SimpleVersion }}
+  AssemblyVersion:
+    description: 'NBGV AssemblyVersion'
+    value: ${{ env.NBGV_AssemblyVersion }}
+  AssemblyFileVersion:
+    description: 'NBGV AssemblyFileVersion'
+    value: ${{ env.NBGV_AssemblyFileVersion }}
+  AssemblyInformationalVersion:
+    description: 'NBGV AssemblyInformationalVersion'
+    value: ${{ env.NBGV_AssemblyInformationalVersion }}
+  NuGetPackageVersion:
+    description: 'NBGV NuGetPackageVersion'
+    value: ${{ env.NBGV_NuGetPackageVersion }}
+  ChocolateyPackageVersion:
+    description: 'NBGV ChocolateyPackageVersion'
+    value: ${{ env.NBGV_ChocolateyPackageVersion }}
+  NpmPackageVersion:
+    description: 'NBGV NpmPackageVersion'
+    value: ${{ env.NBGV_NpmPackageVersion }}
+  GitCommitId:
+    description: 'NBGV GitCommitId'
+    value: ${{ env.NBGV_GitCommitId }}
+  GitCommitIdShort:
+    description: 'NBGV GitCommitIdShort'
+    value: ${{ env.NBGV_GitCommitIdShort }}
+  VersionHeight:
+    description: 'NBGV VersionHeight'
+    value: ${{ env.NBGV_VersionHeight }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install (or update) nbgv global tool
+      shell: bash
+      run: |
+        echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+        # `tool update` installs if missing and upgrades if present, so we always
+        # end up on the latest published nbgv regardless of what the runner ships.
+        dotnet tool update --global nbgv
+
+    - name: Set NBGV_* cloud variables
+      shell: bash
+      run: nbgv cloud -a
