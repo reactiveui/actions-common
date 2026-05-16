@@ -1,0 +1,93 @@
+name: SonarCloud
+description: |
+  Wrap a .NET build/test run with SonarCloud analysis. Call once with mode=begin
+  before the build, then again with mode=end after the test step. Designed to be
+  inserted into the Linux build job so the same machine begins and ends the scan.
+
+  The SonarCloud token is read from the SONAR_TOKEN environment variable — set it
+  at the calling job/step level via `env: SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}`
+  so the value flows through the GitHub Actions secret-masking pipeline. (Composite
+  actions cannot declare secret-typed inputs; only reusable workflows can.)
+
+inputs:
+  mode:
+    description: 'begin (before build) or end (after test).'
+    required: true
+  project-key:
+    description: 'SonarCloud project key (e.g. reactiveui_Foo). Required for both modes.'
+    required: true
+  organization:
+    description: 'SonarCloud organization slug (e.g. reactiveui). Required for begin.'
+    required: false
+    default: ''
+  host-url:
+    description: 'Sonar host URL — defaults to https://sonarcloud.io.'
+    required: false
+    default: 'https://sonarcloud.io'
+  version:
+    description: 'Project version (typically the MinVer/NBGV SemVer2 output). Optional but improves Sonar history.'
+    required: false
+    default: ''
+  coverage-glob:
+    description: 'Glob (relative to GITHUB_WORKSPACE) for cobertura coverage reports.'
+    required: false
+    default: '**/coverage*.cobertura.xml'
+  extra-begin-args:
+    description: 'Extra raw arguments to append to the dotnet-sonarscanner begin invocation.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Validate SONAR_TOKEN is in scope
+      shell: bash
+      run: |
+        if [ -z "${SONAR_TOKEN:-}" ]; then
+          echo "::error::SONAR_TOKEN is not set in the job/step env. Configure 'env: SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}' on the caller."
+          exit 1
+        fi
+
+    - name: Set up JDK 17 (SonarScanner prerequisite)
+      if: inputs.mode == 'begin'
+      uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: '17'
+
+    - name: Install (or update) dotnet-sonarscanner global tool
+      if: inputs.mode == 'begin'
+      shell: bash
+      run: |
+        echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+        dotnet tool update --global dotnet-sonarscanner
+
+    - name: SonarScanner begin
+      if: inputs.mode == 'begin'
+      shell: bash
+      run: |
+        VERSION_ARG=""
+        if [ -n "${{ inputs.version }}" ]; then
+          VERSION_ARG="/v:\"${{ inputs.version }}\""
+        fi
+        ORG_ARG=""
+        if [ -n "${{ inputs.organization }}" ]; then
+          ORG_ARG="/o:\"${{ inputs.organization }}\""
+        fi
+
+        # shellcheck disable=SC2086
+        dotnet sonarscanner begin \
+          /k:"${{ inputs.project-key }}" \
+          $ORG_ARG \
+          /d:sonar.host.url="${{ inputs.host-url }}" \
+          /d:sonar.token="$SONAR_TOKEN" \
+          /d:sonar.cs.vscoveragexml.reportsPaths="${{ inputs.coverage-glob }}" \
+          /d:sonar.cs.opencover.reportsPaths="${{ inputs.coverage-glob }}" \
+          /d:sonar.coverage.exclusions="**/*Tests/**,**/*Tests.cs,**/Generated/**" \
+          $VERSION_ARG \
+          ${{ inputs.extra-begin-args }}
+
+    - name: SonarScanner end
+      if: inputs.mode == 'end'
+      shell: bash
+      run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"

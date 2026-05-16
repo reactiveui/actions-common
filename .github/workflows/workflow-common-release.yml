@@ -31,7 +31,32 @@ on:
       useNBGV:
         type: boolean
         default: true
-        description: 'Run NBGV to stamp version variables'
+        description: 'DEPRECATED — pass versioningTool instead. true → nbgv, false → none. Ignored when versioningTool is set.'
+
+      versioningTool:
+        type: string
+        default: ''
+        description: 'Versioning tool to run: nbgv | minver | none. Takes precedence over useNBGV when set.'
+
+      minverMinimumMajorMinor:
+        type: string
+        default: ''
+        description: 'When versioningTool=minver: floor major.minor when no tag is reachable.'
+
+      minverTagPrefix:
+        type: string
+        default: 'v'
+        description: 'When versioningTool=minver: git tag prefix MinVer expects.'
+
+      minverAutoIncrement:
+        type: string
+        default: 'minor'
+        description: 'When versioningTool=minver: auto-increment segment (major|minor|patch).'
+
+      minverDefaultPreReleaseIdentifiers:
+        type: string
+        default: 'alpha.0'
+        description: 'When versioningTool=minver: pre-release identifier(s) for height-only builds.'
 
       installWorkloads:
         type: boolean
@@ -45,7 +70,7 @@ on:
 
     outputs:
       semver2:
-        description: 'The NBGV SemVer2 version string'
+        description: 'SemVer2 version string from the chosen versioning tool (NBGV or MinVer).'
         value: ${{ jobs.build-sign-release.outputs.semver2 }}
 
     secrets:
@@ -88,6 +113,11 @@ jobs:
           solution-file: ${{ inputs.solutionFile }}
           install-workloads: ${{ inputs.installWorkloads }}
           use-nbgv: ${{ inputs.useNBGV }}
+          versioning-tool: ${{ inputs.versioningTool }}
+          minver-tag-prefix: ${{ inputs.minverTagPrefix }}
+          minver-minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
+          minver-auto-increment: ${{ inputs.minverAutoIncrement }}
+          minver-default-pre-release-identifiers: ${{ inputs.minverDefaultPreReleaseIdentifiers }}
 
       - name: Build (dotnet)
         if: inputs.useUNO == false

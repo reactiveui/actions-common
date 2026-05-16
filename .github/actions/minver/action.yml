@@ -1,0 +1,155 @@
+name: MinVer
+description: Install the minver-cli dotnet global tool and stamp MINVER_* cloud variables and step outputs for the current commit. Mirrors the output shape of the nbgv action so callers can swap between them by changing one input.
+
+inputs:
+  tag-prefix:
+    description: 'Tag prefix MinVer expects on release tags (default: v)'
+    required: false
+    default: 'v'
+  minimum-major-minor:
+    description: 'Floor major.minor when no tag is reachable (e.g. "1.0"). Empty leaves MinVer default of 0.0.'
+    required: false
+    default: ''
+  default-pre-release-identifiers:
+    description: 'Pre-release identifier(s) for height-only builds (e.g. "alpha.0").'
+    required: false
+    default: 'alpha.0'
+  auto-increment:
+    description: 'Which segment MinVer should auto-increment when no tag is reachable (major|minor|patch).'
+    required: false
+    default: 'minor'
+  verbosity:
+    description: 'MinVer CLI verbosity (error|warn|info|debug|trace).'
+    required: false
+    default: 'info'
+
+outputs:
+  SemVer2:
+    description: 'Full MinVer SemVer2 version string (e.g. 1.2.3-alpha.0.45+sha.abcdef0)'
+    value: ${{ steps.outputs.outputs.SemVer2 }}
+  SimpleVersion:
+    description: 'major.minor.patch only (no pre-release / metadata)'
+    value: ${{ steps.outputs.outputs.SimpleVersion }}
+  AssemblyVersion:
+    description: 'major.0.0.0 — stable across patch versions for binary compat'
+    value: ${{ steps.outputs.outputs.AssemblyVersion }}
+  AssemblyFileVersion:
+    description: 'major.minor.patch.0'
+    value: ${{ steps.outputs.outputs.AssemblyFileVersion }}
+  AssemblyInformationalVersion:
+    description: 'Full SemVer2 with build metadata — same as SemVer2'
+    value: ${{ steps.outputs.outputs.AssemblyInformationalVersion }}
+  NuGetPackageVersion:
+    description: 'NuGet-compatible version (SemVer2 without build metadata)'
+    value: ${{ steps.outputs.outputs.NuGetPackageVersion }}
+  GitCommitId:
+    description: 'Full SHA of HEAD'
+    value: ${{ steps.outputs.outputs.GitCommitId }}
+  GitCommitIdShort:
+    description: 'Short SHA of HEAD (7 chars)'
+    value: ${{ steps.outputs.outputs.GitCommitIdShort }}
+  VersionHeight:
+    description: 'Commits since the last reachable version tag'
+    value: ${{ steps.outputs.outputs.VersionHeight }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install (or update) minver-cli global tool
+      shell: bash
+      run: |
+        echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+        # `tool update` installs if missing and upgrades if present, so we always
+        # end up on the latest published minver-cli regardless of what the runner ships.
+        dotnet tool update --global minver-cli
+
+    - name: Compute MinVer version and export MINVER_* + GITHUB_OUTPUT
+      id: outputs
+      shell: bash
+      env:
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        MINIMUM_MAJOR_MINOR: ${{ inputs.minimum-major-minor }}
+        DEFAULT_PRE_RELEASE: ${{ inputs.default-pre-release-identifiers }}
+        AUTO_INCREMENT: ${{ inputs.auto-increment }}
+        VERBOSITY: ${{ inputs.verbosity }}
+      run: |
+        ARGS=(--tag-prefix "$TAG_PREFIX" --verbosity "$VERBOSITY" --auto-increment "$AUTO_INCREMENT")
+        if [ -n "$MINIMUM_MAJOR_MINOR" ]; then
+          ARGS+=(--minimum-major-minor "$MINIMUM_MAJOR_MINOR")
+        fi
+        if [ -n "$DEFAULT_PRE_RELEASE" ]; then
+          ARGS+=(--default-pre-release-identifiers "$DEFAULT_PRE_RELEASE")
+        fi
+
+        SEMVER2=$(minver "${ARGS[@]}")
+        echo "MinVer produced: $SEMVER2"
+
+        # Derive the rest by parsing SEMVER2: "<major>.<minor>.<patch>[-<pre>][+<meta>]"
+        VERSION_CORE="${SEMVER2%%[-+]*}"          # strip pre-release / metadata
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_CORE"
+        REMAINDER="${SEMVER2#$VERSION_CORE}"
+        PRE_RELEASE=""
+        BUILD_META=""
+        case "$REMAINDER" in
+          -*)   # "-pre+meta" or just "-pre"
+            REST="${REMAINDER#-}"
+            PRE_RELEASE="${REST%%+*}"
+            case "$REST" in *+*) BUILD_META="${REST#*+}";; esac
+            ;;
+          +*)
+            BUILD_META="${REMAINDER#+}"
+            ;;
+        esac
+
+        ASSEMBLY_VERSION="${MAJOR}.0.0.0"
+        ASSEMBLY_FILE_VERSION="${MAJOR}.${MINOR}.${PATCH}.0"
+
+        # NuGet 3+ accepts SemVer2 including pre-release; we still strip +meta
+        # because most package feeds reject build metadata and the NBGV action
+        # exposed a metadata-free flavor under this name.
+        if [ -n "$PRE_RELEASE" ]; then
+          NUGET_PACKAGE_VERSION="${VERSION_CORE}-${PRE_RELEASE}"
+        else
+          NUGET_PACKAGE_VERSION="$VERSION_CORE"
+        fi
+
+        FULL_SHA=$(git rev-parse HEAD)
+        SHORT_SHA=$(git rev-parse --short=7 HEAD)
+
+        VERSION_HEIGHT=0
+        if LAST_TAG=$(git describe --tags --abbrev=0 --match "${TAG_PREFIX}*" 2>/dev/null); then
+          VERSION_HEIGHT=$(git rev-list --count "${LAST_TAG}..HEAD")
+        else
+          VERSION_HEIGHT=$(git rev-list --count HEAD)
+        fi
+
+        # Export as cloud variables (mirrors NBGV's `nbgv cloud -a` behavior)
+        {
+          echo "MINVER_SemVer2=${SEMVER2}"
+          echo "MINVER_SimpleVersion=${VERSION_CORE}"
+          echo "MINVER_AssemblyVersion=${ASSEMBLY_VERSION}"
+          echo "MINVER_AssemblyFileVersion=${ASSEMBLY_FILE_VERSION}"
+          echo "MINVER_AssemblyInformationalVersion=${SEMVER2}"
+          echo "MINVER_NuGetPackageVersion=${NUGET_PACKAGE_VERSION}"
+          echo "MINVER_GitCommitId=${FULL_SHA}"
+          echo "MINVER_GitCommitIdShort=${SHORT_SHA}"
+          echo "MINVER_VersionHeight=${VERSION_HEIGHT}"
+        } >> "$GITHUB_ENV"
+
+        # Also surface to dotnet so MSBuild can pick up the version without
+        # MinVer needing to walk git on every project (and so CI overrides
+        # whatever local tag state would have produced).
+        echo "MINVERVERSIONOVERRIDE=${SEMVER2}" >> "$GITHUB_ENV"
+
+        # Step outputs (same names as the nbgv action so workflows can swap.)
+        {
+          echo "SemVer2=${SEMVER2}"
+          echo "SimpleVersion=${VERSION_CORE}"
+          echo "AssemblyVersion=${ASSEMBLY_VERSION}"
+          echo "AssemblyFileVersion=${ASSEMBLY_FILE_VERSION}"
+          echo "AssemblyInformationalVersion=${SEMVER2}"
+          echo "NuGetPackageVersion=${NUGET_PACKAGE_VERSION}"
+          echo "GitCommitId=${FULL_SHA}"
+          echo "GitCommitIdShort=${SHORT_SHA}"
+          echo "VersionHeight=${VERSION_HEIGHT}"
+        } >> "$GITHUB_OUTPUT"
