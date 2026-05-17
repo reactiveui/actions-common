@@ -69,11 +69,11 @@ runs:
       run: |
         VERSION_ARG=""
         if [ -n "${{ inputs.version }}" ]; then
-          VERSION_ARG="/v:\"${{ inputs.version }}\""
+          VERSION_ARG="/v:${{ inputs.version }}"
         fi
         ORG_ARG=""
         if [ -n "${{ inputs.organization }}" ]; then
-          ORG_ARG="/o:\"${{ inputs.organization }}\""
+          ORG_ARG="/o:${{ inputs.organization }}"
         fi
 
         # shellcheck disable=SC2086
