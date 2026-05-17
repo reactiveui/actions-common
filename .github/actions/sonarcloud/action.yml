@@ -37,6 +37,10 @@ inputs:
     description: 'Extra raw arguments to append to the dotnet-sonarscanner begin invocation.'
     required: false
     default: ''
+  working-directory:
+    description: 'Directory in which to run sonarscanner begin/end. Must be the same folder the build runs from (typically srcFolder), otherwise Sonar cannot collect project info.'
+    required: false
+    default: '.'
 
 runs:
   using: composite
@@ -66,6 +70,7 @@ runs:
     - name: SonarScanner begin
       if: inputs.mode == 'begin'
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         VERSION_ARG=""
         if [ -n "${{ inputs.version }}" ]; then
@@ -91,4 +96,5 @@ runs:
     - name: SonarScanner end
       if: inputs.mode == 'end'
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"

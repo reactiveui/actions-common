@@ -401,6 +401,7 @@ jobs:
           host-url: ${{ inputs.sonarHostUrl }}
           version: ${{ steps.environment.outputs.version-semver2 }}
           extra-begin-args: ${{ inputs.sonarExtraBeginArgs }}
+          working-directory: ${{ inputs.srcFolder }}
 
       - name: Build
         uses: reactiveui/actions-common/.github/actions/dotnet-build@main
@@ -431,3 +432,4 @@ jobs:
         with:
           mode: end
           project-key: ${{ inputs.sonarProjectKey }}
+          working-directory: ${{ inputs.srcFolder }}
