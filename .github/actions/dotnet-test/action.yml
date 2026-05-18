@@ -112,7 +112,7 @@ runs:
           # silently ignored by MTP, so we use the real MTP flags here.
           # Sync file writes are critical: async logs are lost if a hanging
           # test gets killed by the CI runner.
-          DIAG_ARGS="--diagnostic --diagnostic-verbosity Trace --diagnostic-filelogger-synchronouswrite --log-level Trace --output Detailed"
+          DIAG_ARGS="--diagnostic --diagnostic-verbosity Trace --diagnostic-synchronous-write --log-level Trace --output Detailed"
         fi
         TIMEOUT_ARGS=""
         if [ -n "${{ inputs.test-timeout }}" ]; then
