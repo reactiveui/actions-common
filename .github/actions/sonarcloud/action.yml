@@ -30,9 +30,9 @@ inputs:
     required: false
     default: ''
   coverage-glob:
-    description: 'Glob (relative to GITHUB_WORKSPACE) for cobertura coverage reports.'
+    description: 'Glob (relative to GITHUB_WORKSPACE) for cobertura coverage reports. Microsoft.Testing.Platform writes <guid>.cobertura.xml files, so the default matches any *.cobertura.xml under the workspace.'
     required: false
-    default: '**/coverage*.cobertura.xml'
+    default: '**/*.cobertura.xml'
   extra-begin-args:
     description: 'Extra raw arguments to append to the dotnet-sonarscanner begin invocation.'
     required: false
@@ -121,6 +121,7 @@ runs:
           /d:sonar.token="$SONAR_TOKEN" \
           /d:sonar.cs.vscoveragexml.reportsPaths="${{ inputs.coverage-glob }}" \
           /d:sonar.cs.opencover.reportsPaths="${{ inputs.coverage-glob }}" \
+          /d:sonar.cs.cobertura.reportsPaths="${{ inputs.coverage-glob }}" \
           $EXCLUSIONS_ARG \
           $COVERAGE_EXCLUSIONS_ARG \
           $CPD_EXCLUSIONS_ARG \
