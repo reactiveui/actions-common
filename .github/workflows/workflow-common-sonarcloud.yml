@@ -93,6 +93,26 @@ on:
         default: ''
         description: 'Extra raw arguments appended to the dotnet-sonarscanner begin invocation.'
 
+      sonarExclusions:
+        type: string
+        default: ''
+        description: 'Comma-separated globs for sonar.exclusions (files Sonar fully ignores). Empty = flag omitted.'
+
+      sonarCoverageExclusions:
+        type: string
+        default: '**/*Tests/**,**/*Tests.cs,**/Generated/**'
+        description: 'Comma-separated globs for sonar.coverage.exclusions (files excluded from coverage). Empty = flag omitted.'
+
+      sonarCpdExclusions:
+        type: string
+        default: ''
+        description: 'Comma-separated globs for sonar.cpd.exclusions (files excluded from copy/paste detection). Empty = flag omitted.'
+
+      sonarTestExclusions:
+        type: string
+        default: ''
+        description: 'Comma-separated globs for sonar.test.exclusions (files Sonar will not treat as tests). Empty = flag omitted.'
+
       installWorkloads:
         type: boolean
         default: false
@@ -171,6 +191,10 @@ jobs:
           host-url: ${{ inputs.sonarHostUrl }}
           version: ${{ steps.environment.outputs.version-semver2 }}
           extra-begin-args: ${{ inputs.sonarExtraBeginArgs }}
+          exclusions: ${{ inputs.sonarExclusions }}
+          coverage-exclusions: ${{ inputs.sonarCoverageExclusions }}
+          cpd-exclusions: ${{ inputs.sonarCpdExclusions }}
+          test-exclusions: ${{ inputs.sonarTestExclusions }}
           working-directory: ${{ inputs.srcFolder }}
 
       - name: Build

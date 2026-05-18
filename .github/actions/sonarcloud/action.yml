@@ -37,6 +37,22 @@ inputs:
     description: 'Extra raw arguments to append to the dotnet-sonarscanner begin invocation.'
     required: false
     default: ''
+  exclusions:
+    description: 'Comma-separated glob list for sonar.exclusions (files Sonar fully ignores). Empty = flag omitted.'
+    required: false
+    default: ''
+  coverage-exclusions:
+    description: 'Comma-separated glob list for sonar.coverage.exclusions (files excluded from coverage calculation). Empty = flag omitted.'
+    required: false
+    default: '**/*Tests/**,**/*Tests.cs,**/Generated/**'
+  cpd-exclusions:
+    description: 'Comma-separated glob list for sonar.cpd.exclusions (files excluded from copy/paste detection). Empty = flag omitted.'
+    required: false
+    default: ''
+  test-exclusions:
+    description: 'Comma-separated glob list for sonar.test.exclusions (files Sonar will not treat as tests). Empty = flag omitted.'
+    required: false
+    default: ''
   working-directory:
     description: 'Directory in which to run sonarscanner begin/end. Must be the same folder the build runs from (typically srcFolder), otherwise Sonar cannot collect project info.'
     required: false
@@ -80,6 +96,22 @@ runs:
         if [ -n "${{ inputs.organization }}" ]; then
           ORG_ARG="/o:${{ inputs.organization }}"
         fi
+        EXCLUSIONS_ARG=""
+        if [ -n "${{ inputs.exclusions }}" ]; then
+          EXCLUSIONS_ARG="/d:sonar.exclusions=${{ inputs.exclusions }}"
+        fi
+        COVERAGE_EXCLUSIONS_ARG=""
+        if [ -n "${{ inputs.coverage-exclusions }}" ]; then
+          COVERAGE_EXCLUSIONS_ARG="/d:sonar.coverage.exclusions=${{ inputs.coverage-exclusions }}"
+        fi
+        CPD_EXCLUSIONS_ARG=""
+        if [ -n "${{ inputs.cpd-exclusions }}" ]; then
+          CPD_EXCLUSIONS_ARG="/d:sonar.cpd.exclusions=${{ inputs.cpd-exclusions }}"
+        fi
+        TEST_EXCLUSIONS_ARG=""
+        if [ -n "${{ inputs.test-exclusions }}" ]; then
+          TEST_EXCLUSIONS_ARG="/d:sonar.test.exclusions=${{ inputs.test-exclusions }}"
+        fi
 
         # shellcheck disable=SC2086
         dotnet sonarscanner begin \
@@ -89,7 +121,10 @@ runs:
           /d:sonar.token="$SONAR_TOKEN" \
           /d:sonar.cs.vscoveragexml.reportsPaths="${{ inputs.coverage-glob }}" \
           /d:sonar.cs.opencover.reportsPaths="${{ inputs.coverage-glob }}" \
-          /d:sonar.coverage.exclusions="**/*Tests/**,**/*Tests.cs,**/Generated/**" \
+          $EXCLUSIONS_ARG \
+          $COVERAGE_EXCLUSIONS_ARG \
+          $CPD_EXCLUSIONS_ARG \
+          $TEST_EXCLUSIONS_ARG \
           $VERSION_ARG \
           ${{ inputs.extra-begin-args }}
 
