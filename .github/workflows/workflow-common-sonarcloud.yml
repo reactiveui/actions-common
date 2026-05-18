@@ -135,8 +135,13 @@ on:
 
       enableDetailedTestLogging:
         type: boolean
-        default: false
-        description: 'Enable detailed verbosity for MTP test runs (useful for debugging hangs)'
+        default: true
+        description: 'Enable MTP diagnostic logging (Trace-level .diag files, sync writes, --output Detailed). Default on for hang/crash debuggability.'
+
+      testTimeout:
+        type: string
+        default: ''
+        description: 'Optional global MTP test timeout (format [h|m|s], e.g. "5m"). Empty = no timeout.'
 
     secrets:
       SONAR_TOKEN:
@@ -217,6 +222,7 @@ jobs:
           coverage-formats: ${{ inputs.coverageFormats }}
           product-namespace-prefix: ${{ inputs.productNamespacePrefix }}
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
+          test-timeout: ${{ inputs.testTimeout }}
 
       - name: SonarCloud end
         # Always end the scan if begin succeeded, so a failed build/test still

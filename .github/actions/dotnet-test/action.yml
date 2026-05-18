@@ -30,9 +30,13 @@ inputs:
     description: 'Namespace prefix for coverage include/exclude filters'
     required: true
   enable-detailed-test-logging:
-    description: 'Enable detailed verbosity for MTP test runs'
+    description: 'Enable MTP diagnostic logging for hang/crash debugging: writes log_*.diag (Trace level, synchronous), turns on framework log-level Trace, and switches console output to Detailed (real-time per-test).'
     required: false
-    default: 'false'
+    default: 'true'
+  test-timeout:
+    description: 'Optional global test timeout passed to MTP --timeout (format [h|m|s], e.g. "5m"). Empty = no timeout. Use to fail fast on hangs instead of letting the CI runner kill the job.'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -102,15 +106,25 @@ runs:
       shell: bash
       working-directory: ${{ inputs.src-folder }}
       run: |
-        VERBOSITY_ARGS=""
+        DIAG_ARGS=""
         if [ "${{ inputs.enable-detailed-test-logging }}" == "true" ]; then
-          VERBOSITY_ARGS="--verbosity detailed --output Detailed"
+          # MTP diagnostic logging — note --verbosity is a VSTest flag and is
+          # silently ignored by MTP, so we use the real MTP flags here.
+          # Sync file writes are critical: async logs are lost if a hanging
+          # test gets killed by the CI runner.
+          DIAG_ARGS="--diagnostic --diagnostic-verbosity Trace --diagnostic-filelogger-synchronouswrite --log-level Trace --output Detailed"
+        fi
+        TIMEOUT_ARGS=""
+        if [ -n "${{ inputs.test-timeout }}" ]; then
+          TIMEOUT_ARGS="--timeout ${{ inputs.test-timeout }}"
         fi
 
+        # shellcheck disable=SC2086
         dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
           --no-build \
           --configuration ${{ inputs.configuration }} \
-          $VERBOSITY_ARGS \
+          $DIAG_ARGS \
+          $TIMEOUT_ARGS \
           --coverage \
           --coverage-output-format cobertura \
           --results-directory ./TestResults
@@ -136,3 +150,17 @@ runs:
           ${{ inputs.src-folder }}/**/TestResults/**/*.cobertura.xml
         if-no-files-found: warn
         retention-days: 3
+
+    # Always upload MTP diagnostic logs (when produced) so hangs/crashes are
+    # debuggable. if: always() ensures the upload runs even if the test step
+    # failed or was killed.
+    - name: Upload MTP diagnostic logs
+      if: always() && steps.detect-mode.outputs.mode == 'mtp' && inputs.enable-detailed-test-logging == 'true'
+      uses: actions/upload-artifact@v7
+      with:
+        name: mtp-diagnostic-logs-${{ runner.os }}
+        path: |
+          ${{ inputs.src-folder }}/**/TestResults/**/*.diag
+          ${{ inputs.src-folder }}/**/TestResults/**/log_*.diag
+        if-no-files-found: ignore
+        retention-days: 7
