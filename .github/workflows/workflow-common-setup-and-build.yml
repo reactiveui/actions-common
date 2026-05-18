@@ -99,11 +99,6 @@ on:
         default: ''
         description: 'Extra raw arguments appended to the dotnet-sonarscanner begin invocation.'
 
-      createArtifacts:
-        type: boolean
-        default: true
-        description: 'Upload NuGet packages from Windows job'
-
       installWorkloads:
         type: boolean
         default: false
@@ -199,7 +194,7 @@ jobs:
           configuration: ${{ inputs.configuration }}
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
-          create-packages: 'true'
+          create-packages: 'false'
 
       - name: Build (UNO)
         if: inputs.useUNO == true
@@ -221,14 +216,6 @@ jobs:
           coverage-formats: ${{ inputs.coverageFormats }}
           product-namespace-prefix: ${{ inputs.productNamespacePrefix }}
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
-
-      - name: Upload NuGet Packages
-        if: inputs.createArtifacts == true
-        uses: actions/upload-artifact@v7
-        with:
-          name: nuget
-          path: '**/*.nupkg'
-          if-no-files-found: warn
 
   # ============================
   # LINUX & MACOS (parallel matrix)
