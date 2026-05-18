@@ -1,0 +1,205 @@
+name: Common SonarCloud analysis workflow
+
+# Standalone SonarCloud scan: checks out the repo, restores the .NET
+# environment, runs sonarscanner begin -> dotnet build -> dotnet test ->
+# sonarscanner end on a Linux runner. Call this from a project's own
+# workflow alongside (not inside) the regular CI build.
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      configuration:
+        type: string
+        default: 'Release'
+        description: 'Build configuration'
+
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+        description: 'Newline-separated list of .NET SDKs'
+
+      productNamespacePrefix:
+        type: string
+        required: true
+        description: 'Namespace prefix for coverage include/exclude filters'
+
+      solutionFile:
+        type: string
+        description: 'Solution file relative to srcFolder'
+
+      srcFolder:
+        type: string
+        default: 'src'
+        description: 'Folder containing the solution'
+
+      performTests:
+        type: boolean
+        default: true
+        description: 'Run tests + collect coverage inside the Sonar scan'
+
+      useNBGV:
+        type: boolean
+        default: true
+        description: 'DEPRECATED - pass versioningTool instead. true means nbgv, false means none. Ignored when versioningTool is set.'
+
+      versioningTool:
+        type: string
+        default: ''
+        description: 'Versioning tool to run: nbgv | minver | none. Takes precedence over useNBGV when set.'
+
+      minverMinimumMajorMinor:
+        type: string
+        default: ''
+        description: 'When versioningTool=minver: floor major.minor when no tag is reachable (e.g. "1.0").'
+
+      minverTagPrefix:
+        type: string
+        default: 'v'
+        description: 'When versioningTool=minver: git tag prefix MinVer expects.'
+
+      minverAutoIncrement:
+        type: string
+        default: 'minor'
+        description: 'When versioningTool=minver: auto-increment segment (major|minor|patch).'
+
+      minverDefaultPreReleaseIdentifiers:
+        type: string
+        default: 'alpha.0'
+        description: 'When versioningTool=minver: pre-release identifier(s) for height-only builds.'
+
+      sonarProjectKey:
+        type: string
+        required: true
+        description: 'SonarCloud project key (e.g. reactiveui_Foo).'
+
+      sonarOrganization:
+        type: string
+        required: true
+        description: 'SonarCloud organization slug (e.g. reactiveui).'
+
+      sonarHostUrl:
+        type: string
+        default: 'https://sonarcloud.io'
+        description: 'SonarCloud / SonarQube host URL.'
+
+      sonarExtraBeginArgs:
+        type: string
+        default: ''
+        description: 'Extra raw arguments appended to the dotnet-sonarscanner begin invocation.'
+
+      installWorkloads:
+        type: boolean
+        default: false
+        description: 'If true, run workload restore'
+
+      testsProjectGlob:
+        type: string
+        default: '**/*Tests*.csproj'
+        description: 'Glob for test csproj files, relative to srcFolder'
+
+      coverageFormats:
+        type: string
+        default: 'cobertura'
+        description: 'Coverage output format (cobertura, xml, coverage)'
+
+      testingMode:
+        type: string
+        default: 'auto'
+        description: 'Testing mode: auto (detect), mtp (Microsoft Testing Platform), legacy (Coverlet)'
+
+      enableDetailedTestLogging:
+        type: boolean
+        default: false
+        description: 'Enable detailed verbosity for MTP test runs (useful for debugging hangs)'
+
+    secrets:
+      SONAR_TOKEN:
+        required: true
+        description: 'SonarCloud token.'
+
+jobs:
+  sonarcloud:
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+      # Surface SONAR_TOKEN to every step in this job so the composite action
+      # (which reads from env, not inputs, since composite actions cannot
+      # declare secret-typed inputs) can see it.
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - name: Validate SonarCloud token
+        run: |
+          if [ -z "${SONAR_TOKEN:-}" ]; then
+            echo "::error::SONAR_TOKEN secret is required"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Setup .NET Environment
+        id: environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+          use-nbgv: ${{ inputs.useNBGV }}
+          versioning-tool: ${{ inputs.versioningTool }}
+          minver-tag-prefix: ${{ inputs.minverTagPrefix }}
+          minver-minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
+          minver-auto-increment: ${{ inputs.minverAutoIncrement }}
+          minver-default-pre-release-identifiers: ${{ inputs.minverDefaultPreReleaseIdentifiers }}
+
+      - name: SonarCloud begin
+        uses: reactiveui/actions-common/.github/actions/sonarcloud@main
+        with:
+          mode: begin
+          project-key: ${{ inputs.sonarProjectKey }}
+          organization: ${{ inputs.sonarOrganization }}
+          host-url: ${{ inputs.sonarHostUrl }}
+          version: ${{ steps.environment.outputs.version-semver2 }}
+          extra-begin-args: ${{ inputs.sonarExtraBeginArgs }}
+          working-directory: ${{ inputs.srcFolder }}
+
+      - name: Build
+        uses: reactiveui/actions-common/.github/actions/dotnet-build@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          create-packages: 'false'
+
+      - name: Test
+        if: inputs.performTests == true
+        uses: reactiveui/actions-common/.github/actions/dotnet-test@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          testing-mode: ${{ inputs.testingMode }}
+          tests-project-glob: ${{ inputs.testsProjectGlob }}
+          coverage-formats: ${{ inputs.coverageFormats }}
+          product-namespace-prefix: ${{ inputs.productNamespacePrefix }}
+          enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
+
+      - name: SonarCloud end
+        # Always end the scan if begin succeeded, so a failed build/test still
+        # uploads partial analysis to Sonar instead of leaving the scan dangling.
+        if: always()
+        uses: reactiveui/actions-common/.github/actions/sonarcloud@main
+        with:
+          mode: end
+          project-key: ${{ inputs.sonarProjectKey }}
+          working-directory: ${{ inputs.srcFolder }}
