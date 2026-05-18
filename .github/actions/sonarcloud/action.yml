@@ -119,8 +119,6 @@ runs:
           $ORG_ARG \
           /d:sonar.host.url="${{ inputs.host-url }}" \
           /d:sonar.token="$SONAR_TOKEN" \
-          /d:sonar.cs.vscoveragexml.reportsPaths="${{ inputs.coverage-glob }}" \
-          /d:sonar.cs.opencover.reportsPaths="${{ inputs.coverage-glob }}" \
           /d:sonar.cs.cobertura.reportsPaths="${{ inputs.coverage-glob }}" \
           $EXCLUSIONS_ARG \
           $COVERAGE_EXCLUSIONS_ARG \
