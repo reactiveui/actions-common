@@ -229,6 +229,12 @@ jobs:
   sign-container:
     needs: build
     if: inputs.signerImage != ''
+    # The workflow-level permissions (contents: write) would otherwise strip
+    # packages:read from this job's token, so the GHCR image pull gets denied.
+    # Override here (still capped by what the caller granted).
+    permissions:
+      contents: read
+      packages: read
     environment:
       name: release
     runs-on: ubuntu-latest
