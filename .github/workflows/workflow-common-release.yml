@@ -1,7 +1,11 @@
 name: Common .NET build and release workflow
 
+# packages: read is the ceiling that lets the optional sign-container job pull
+# the (internal) prebuilt signer image. Reusable-workflow job permissions cannot
+# exceed this workflow-level set, so every caller must also grant packages: read.
 permissions:
   contents: write
+  packages: read
 
 on:
   workflow_call:
