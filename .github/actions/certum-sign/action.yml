@@ -27,6 +27,7 @@ inputs:
   jsign-version:
     description: 'jsign version from Maven Central (net.jsign:jsign).'
     required: false
+    # renovate: datasource=maven depName=net.jsign:jsign
     default: '7.4'
   simplysign-bin-url:
     description: 'SimplySign Desktop Linux .bin installer URL.'
