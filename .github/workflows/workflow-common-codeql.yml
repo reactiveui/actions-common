@@ -79,7 +79,6 @@ jobs:
         src-folder: ${{ inputs.srcFolder }}
         solution-file: ${{ inputs.solutionFile }}
         install-workloads: ${{ inputs.installWorkloads && 'true' || 'false' }}
-        use-nbgv: 'false'
 
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4

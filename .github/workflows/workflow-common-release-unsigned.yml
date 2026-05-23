@@ -28,11 +28,6 @@ on:
         default: 'src'
         description: 'Folder containing the solution'
 
-      useNBGV:
-        type: boolean
-        default: true
-        description: 'Run NBGV to stamp version variables'
-
       installWorkloads:
         type: boolean
         default: false
@@ -71,7 +66,6 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
           install-workloads: ${{ inputs.installWorkloads }}
-          use-nbgv: ${{ inputs.useNBGV }}
 
       - name: Build (dotnet)
         if: inputs.useUNO == false

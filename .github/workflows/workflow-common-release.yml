@@ -32,15 +32,10 @@ on:
         default: 'src'
         description: 'Folder containing the solution'
 
-      useNBGV:
-        type: boolean
-        default: true
-        description: 'DEPRECATED — pass versioningTool instead. true → nbgv, false → none. Ignored when versioningTool is set.'
-
       versioningTool:
         type: string
         default: ''
-        description: 'Versioning tool to run: nbgv | minver | none. Takes precedence over useNBGV when set.'
+        description: 'DEPRECATED no-op — MinVer is always used now. Retained so existing callers passing this do not break.'
 
       minverMinimumMajorMinor:
         type: string
@@ -151,8 +146,6 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
           install-workloads: ${{ inputs.installWorkloads }}
-          use-nbgv: ${{ inputs.useNBGV }}
-          versioning-tool: ${{ inputs.versioningTool }}
           minver-tag-prefix: ${{ inputs.minverTagPrefix }}
           minver-minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
           minver-auto-increment: ${{ inputs.minverAutoIncrement }}

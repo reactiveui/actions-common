@@ -1,9 +1,8 @@
 name: .NET Environment Setup
 description: |
-  Setup .NET SDK with caching, optional workloads, and optional version stamping
-  via either Nerdbank.GitVersioning (`versioning-tool: nbgv`) or MinVer
-  (`versioning-tool: minver`). Output shape is unified so callers can swap tools
-  without rewriting downstream steps.
+  Setup .NET SDK with caching, optional workloads, and version stamping with
+  MinVer. Version is computed from the latest reachable v-prefixed tag (or the
+  minver-minimum-major-minor floor when none is reachable).
 
 inputs:
   dotnet-versions:
@@ -21,14 +20,6 @@ inputs:
     description: 'Run dotnet workload restore'
     required: false
     default: 'false'
-  versioning-tool:
-    description: 'Which versioning tool to run: nbgv | minver | none. Takes precedence over the deprecated use-nbgv input when set.'
-    required: false
-    default: ''
-  use-nbgv:
-    description: 'DEPRECATED — use versioning-tool instead. true → nbgv, false → none. Ignored when versioning-tool is set.'
-    required: false
-    default: 'true'
   minver-tag-prefix:
     description: 'Tag prefix for MinVer (default v).'
     required: false
@@ -48,40 +39,15 @@ inputs:
 
 outputs:
   nbgv-semver2:
-    description: 'SemVer2 version string from the chosen versioning tool (empty when versioning is disabled). Name kept for backward compatibility — also produced when versioning-tool=minver.'
-    value: ${{ steps.merge-outputs.outputs.semver2 }}
+    description: 'MinVer SemVer2 version string. Name kept for backward compatibility with callers that consumed the old nbgv output.'
+    value: ${{ steps.minver.outputs.SemVer2 }}
   version-semver2:
     description: 'Alias for nbgv-semver2 with a tool-neutral name.'
-    value: ${{ steps.merge-outputs.outputs.semver2 }}
-  versioning-tool:
-    description: 'The versioning tool actually run (nbgv | minver | none).'
-    value: ${{ steps.resolve-tool.outputs.tool }}
+    value: ${{ steps.minver.outputs.SemVer2 }}
 
 runs:
   using: composite
   steps:
-    - name: Resolve versioning tool
-      id: resolve-tool
-      shell: bash
-      run: |
-        TOOL="${{ inputs.versioning-tool }}"
-        if [ -z "$TOOL" ]; then
-          # Back-compat: fall through to the legacy boolean flag.
-          if [ "${{ inputs.use-nbgv }}" = "true" ]; then
-            TOOL="nbgv"
-          else
-            TOOL="none"
-          fi
-        fi
-        case "$TOOL" in
-          nbgv|minver|none) ;;
-          *)
-            echo "::error::versioning-tool must be one of: nbgv, minver, none (got '$TOOL')"
-            exit 1 ;;
-        esac
-        echo "tool=$TOOL" >> "$GITHUB_OUTPUT"
-        echo "Versioning tool: $TOOL"
-
     - name: Setup .NET SDK with NuGet package cache
       uses: actions/setup-dotnet@v5
       with:
@@ -128,13 +94,7 @@ runs:
           dotnet workload restore --from-previous-sdk --skip-manifest-update
         fi
 
-    - name: Stamp version with Nerdbank.GitVersioning
-      if: steps.resolve-tool.outputs.tool == 'nbgv'
-      id: nbgv
-      uses: reactiveui/actions-common/.github/actions/nbgv@main
-
     - name: Stamp version with MinVer
-      if: steps.resolve-tool.outputs.tool == 'minver'
       id: minver
       uses: reactiveui/actions-common/.github/actions/minver@main
       with:
@@ -142,14 +102,3 @@ runs:
         minimum-major-minor: ${{ inputs.minver-minimum-major-minor }}
         default-pre-release-identifiers: ${{ inputs.minver-default-pre-release-identifiers }}
         auto-increment: ${{ inputs.minver-auto-increment }}
-
-    - name: Merge versioning outputs into tool-neutral output
-      id: merge-outputs
-      shell: bash
-      run: |
-        case "${{ steps.resolve-tool.outputs.tool }}" in
-          nbgv)   SEMVER2='${{ steps.nbgv.outputs.SemVer2 }}' ;;
-          minver) SEMVER2='${{ steps.minver.outputs.SemVer2 }}' ;;
-          *)      SEMVER2='' ;;
-        esac
-        echo "semver2=$SEMVER2" >> "$GITHUB_OUTPUT"
