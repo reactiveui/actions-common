@@ -1,0 +1,206 @@
+name: Certum SimplySign NuGet signing (Linux)
+description: |
+  Author-sign .nupkg files with a Certum "Code Signing in the Cloud" certificate.
+
+  Certum SimplySign has no headless signing API: the cloud key is reachable only
+  through the SimplySign Desktop GUI, which exposes it as a PKCS#11 token. This
+  action runs that GUI headlessly on a Linux runner (Xvfb + xdotool), logs in
+  with the TOTP derived from the otpauth URI, then signs each package with jsign
+  over PKCS#11 and verifies the result with `dotnet nuget verify`.
+
+  MUST run on a Linux runner (uses apt, Xvfb, X11 tooling). Credentials are read
+  from the environment — composite actions cannot declare secret-typed inputs —
+  so map these secrets into env on the calling job (standard secrets.* syntax):
+    CERTUM_USER_ID            SimplySign login id
+    CERTUM_OTP_URI            otpauth:// URI for the SimplySign TOTP
+    CERTUM_CERT_FINGERPRINT   (optional) SHA-256 fingerprint to assert against
+
+inputs:
+  packages-glob:
+    description: 'Glob of .nupkg files to sign (relative to the working directory).'
+    required: false
+    default: 'signed/*.nupkg'
+  timestamp-url:
+    description: 'RFC3161 timestamp authority URL.'
+    required: false
+    default: 'http://time.certum.pl'
+  jsign-version:
+    description: 'jsign version from Maven Central (net.jsign:jsign).'
+    required: false
+    default: '7.4'
+  simplysign-bin-url:
+    description: 'SimplySign Desktop Linux .bin installer URL.'
+    required: false
+    default: 'https://files.certum.eu/software/SimplySignDesktop/Linux-Ubuntu/2.9.14-9.4.3.0/SimplySignDesktop-2.9.14-9.4.3.0-x86_64-prod-ubuntu.bin'
+  launch-seconds:
+    description: 'Seconds to wait after launching SimplySign before driving the UI.'
+    required: false
+    default: '20'
+
+runs:
+  using: composite
+  steps:
+    - name: Install SimplySign + X + signing tooling
+      shell: bash
+      run: |
+        set -euxo pipefail
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          xvfb x11-utils xdotool wmctrl fluxbox \
+          opensc opensc-pkcs11 default-jre-headless unzip openssl \
+          libx11-6 libxext6 libxcomposite1 libxi6 libice6 libsm6 libxrender1 \
+          libxcb1 libxau6 libpcsclite1 libglx-mesa0 libgl1 libxslt1.1 \
+          libxkbcommon0 libxcb-xinerama0 libfontconfig1 libdbus-1-3 procps curl
+        # SimplySign bundles Qt5/WebKit but needs these SYSTEM libs. Install each
+        # independently so a name that differs on this Ubuntu release can't abort
+        # the rest (apt is atomic per invocation).
+        for p in \
+          libpulse-mainloop-glib0 libpulse0 libasound2t64 libasound2 \
+          libqt5webkit5 libqt5multimedia5 libqt5multimediawidgets5 libqt5quick5 \
+          libqt5printsupport5 libqt5positioning5 libqt5sensors5 libqt5opengl5 \
+          libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+          libwoff1 libharfbuzz0b libhyphen0 libwebp7 libwebpdemux2 \
+          libnss3 libxtst6 libxss1 libxrandr2 libxdamage1 libxfixes3 libxcursor1 \
+          libegl1 libgbm1 libxkbcommon-x11-0; do
+          sudo apt-get install -y --no-install-recommends "$p" || echo "::warning::could not install $p"
+        done
+
+    - name: Download + install SimplySign Desktop
+      shell: bash
+      env:
+        SS_BIN_URL: ${{ inputs.simplysign-bin-url }}
+      run: |
+        set -euxo pipefail
+        cd "$RUNNER_TEMP"
+        curl -fsSL -o ss.bin "$SS_BIN_URL"
+        yes yes | sh ss.bin --target "$HOME/certum" || true
+        DIST="$(find "$HOME/certum" -maxdepth 1 -type d -name 'SSD-*-dist' | head -1)"
+        {
+          echo "SS_DIST=$DIST"
+          echo "SS_START=$(find "$HOME/certum" -name 'SimplySignDesktop_start' -type f | head -1)"
+          echo "SS_EXE=$(find "$HOME/certum" -name 'SimplySignDesktop' -type f | head -1)"
+          echo "SS_PKCS11=$(find "$HOME/certum" -name 'SimplySignPKCS*.so' | head -1)"
+        } >> "$GITHUB_ENV"
+
+    - name: Start headless display
+      shell: bash
+      run: |
+        set -euxo pipefail
+        Xvfb :99 -screen 0 1280x1024x24 >"$RUNNER_TEMP/xvfb.log" 2>&1 &
+        sleep 3
+        # Stop fluxbox running fbsetbg (missing default wallpaper -> an xmessage
+        # that steals focus from the login form).
+        mkdir -p "$HOME/.fluxbox"
+        printf 'session.screen0.rootCommand: /bin/true\n' > "$HOME/.fluxbox/init"
+        DISPLAY=:99 fluxbox >"$RUNNER_TEMP/fluxbox.log" 2>&1 &
+        sleep 2
+        DISPLAY=:99 xdpyinfo >/dev/null && echo "X display :99 up"
+
+    - name: Connect SimplySign (headless login)
+      shell: bash
+      env:
+        DISPLAY: ':99'
+      run: |
+        set -uxo pipefail
+        : "${CERTUM_USER_ID:?map the CERTUM_USER_ID secret into the job env}"
+        : "${CERTUM_OTP_URI:?map the CERTUM_OTP_URI secret into the job env}"
+
+        # SimplySign needs its config near $HOME + the logon-dialog preference,
+        # otherwise it shows a "Critical error" on launch.
+        cp "$SS_DIST/SimplySignDesktop.xml" "$HOME/" 2>/dev/null || true
+        mkdir -p "$HOME/.config"
+        { echo "[General]"; echo "CacheUserIdAtLogon=Yes"; echo "ShowLogonDialogAfterApplicationStartup=Yes"; echo "ShowLogonDialogWhenAnyAppRequestsAccess=Yes"; } > "$HOME/.config/Unknown Organization.conf"
+
+        # Launch via the *_start wrapper (sets LD_LIBRARY_PATH for the bundled Qt).
+        export LD_LIBRARY_PATH="$SS_DIST:${LD_LIBRARY_PATH:-}"
+        if [ -n "${SS_START:-}" ]; then "$SS_START" >"$RUNNER_TEMP/simplysign.log" 2>&1 &
+        else "$SS_EXE" >"$RUNNER_TEMP/simplysign.log" 2>&1 & fi
+        sleep "${{ inputs.launch-seconds }}"
+
+        # Current OTP from the otpauth URI (honours algorithm/digits/period).
+        OTP="$(python3 - <<'PY'
+        import os,hmac,hashlib,base64,struct,time
+        from urllib.parse import urlparse,parse_qs
+        q=parse_qs(urlparse(os.environ["CERTUM_OTP_URI"]).query)
+        s=q["secret"][0]
+        digits=int(q.get("digits",["6"])[0]); period=int(q.get("period",["30"])[0])
+        algo={"SHA1":hashlib.sha1,"SHA256":hashlib.sha256,"SHA512":hashlib.sha512}[q.get("algorithm",["SHA1"])[0].upper()]
+        key=base64.b32decode(s+"="*((8-len(s)%8)%8))
+        h=hmac.new(key,struct.pack(">Q",int(time.time()//period)),algo).digest(); o=h[-1]&0xF
+        print(str((int.from_bytes(h[o:o+4],"big")&0x7fffffff)%(10**digits)).zfill(digits))
+        PY
+        )"
+        echo "::add-mask::$OTP"
+
+        # Find the login form: enumerate windows, match getwindowname (_NET_WM_NAME);
+        # `search --name PATTERN` matches the empty legacy WM_NAME for this app.
+        # Retry-wait because the dialog can lag the launch.
+        WID=""; BX=0; BY=0; BW=0; BH=0
+        for attempt in $(seq 1 30); do
+          best=0; WID=""
+          for w in $(xdotool search --name '' 2>/dev/null); do
+            nm="$(xdotool getwindowname "$w" 2>/dev/null || true)"
+            case "$nm" in *implySign*) ;; *) continue ;; esac
+            eval "$(xdotool getwindowgeometry --shell "$w" 2>/dev/null)"
+            area=$(( ${WIDTH:-0} * ${HEIGHT:-0} ))
+            if [ "$area" -gt "$best" ]; then best=$area; WID=$w; BX=${X:-0}; BY=${Y:-0}; BW=${WIDTH:-0}; BH=${HEIGHT:-0}; fi
+          done
+          [ "${BW:-0}" -ge 400 ] && [ "${BH:-0}" -ge 300 ] && { echo "login window $WID ${BW}x${BH} (attempt $attempt)"; break; }
+          WID=""; sleep 2
+        done
+        [ -z "$WID" ] && { echo "::error::SimplySign login window did not appear"; cat "$RUNNER_TEMP/simplysign.log" || true; exit 1; }
+
+        xdotool windowactivate --sync "$WID" || xdotool windowactivate "$WID" || true
+        xdotool windowraise "$WID" || true
+        sleep 1
+        # Click E-MAIL field, type id; Tab; type OTP; click Login.
+        xdotool mousemove $((BX + BW/2)) $((BY + BH*39/100)) click 1; sleep 1
+        xdotool type --clearmodifiers --delay 50 "$CERTUM_USER_ID"
+        xdotool key Tab; sleep 1
+        xdotool type --clearmodifiers --delay 50 "$OTP"
+        xdotool mousemove $((BX + BW/2)) $((BY + BH*76/100)) click 1
+        sleep 8
+
+        # "Logon successful" dialog: the token does NOT activate until its Close
+        # button (bottom-centre) is clicked. Re-find the window (content changed).
+        best=0
+        for w in $(xdotool search --name '' 2>/dev/null); do
+          nm="$(xdotool getwindowname "$w" 2>/dev/null || true)"
+          case "$nm" in *implySign*) ;; *) continue ;; esac
+          eval "$(xdotool getwindowgeometry --shell "$w" 2>/dev/null)"
+          area=$(( ${WIDTH:-0} * ${HEIGHT:-0} ))
+          if [ "$area" -gt "$best" ]; then best=$area; WID=$w; BX=${X:-0}; BY=${Y:-0}; BW=${WIDTH:-0}; BH=${HEIGHT:-0}; fi
+        done
+        xdotool windowactivate --sync "$WID" || true
+        xdotool mousemove $((BX + BW/2)) $((BY + BH*94/100)) click 1
+        sleep 3
+
+        # Confirm the token is active (this also fails fast if login didn't take).
+        timeout 60 pkcs11-tool --module "$SS_PKCS11" -L
+
+    - name: Sign packages with jsign + verify
+      shell: bash
+      env:
+        JSIGN_VERSION: ${{ inputs.jsign-version }}
+        TS_URL: ${{ inputs.timestamp-url }}
+        PKG_GLOB: ${{ inputs.packages-glob }}
+      run: |
+        set -euxo pipefail
+        JAR="$RUNNER_TEMP/jsign.jar"
+        curl -fsSL -o "$JAR" "https://repo1.maven.org/maven2/net/jsign/jsign/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+        CONF="$RUNNER_TEMP/sunpkcs11.conf"
+        { echo "name = SimplySign"; echo "library = $SS_PKCS11"; echo "slotListIndex = 0"; } > "$CONF"
+
+        shopt -s nullglob
+        pkgs=( $PKG_GLOB )
+        [ "${#pkgs[@]}" -gt 0 ] || { echo "::error::no packages matched: $PKG_GLOB"; exit 1; }
+
+        for pkg in "${pkgs[@]}"; do
+          echo "::group::sign $pkg"
+          # Single call: the token has one key (jsign auto-selects it). RFC3161
+          # timestamp so the signature outlives the cert. --replace is harmless.
+          java -jar "$JAR" --storetype PKCS11 --keystore "$CONF" --storepass "" \
+            --alg SHA-256 --tsmode RFC3161 --tsaurl "$TS_URL" --replace "$pkg"
+          dotnet nuget verify "$pkg" --all --verbosity detailed
+          echo "::endgroup::"
+        done
