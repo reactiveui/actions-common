@@ -87,11 +87,6 @@ on:
         default: 'windows-latest'
         description: 'Runner for the build/pack job (e.g. windows-latest, ubuntu-latest). Certum signing always runs on Linux regardless. Defaults to windows-latest because several projects have Windows-specific build logic.'
 
-      signerImage:
-        type: string
-        default: ''
-        description: 'Optional prebuilt Certum signer image (e.g. ghcr.io/reactiveui/certum-signer:latest). When set, signing runs inside that container (fast: SimplySign + jsign baked in) and the caller must grant packages:read. Empty = sign on a bare ubuntu-latest runner (installs everything at runtime).'
-
     outputs:
       semver2:
         description: 'SemVer2 version string from the chosen versioning tool (NBGV or MinVer).'
@@ -193,50 +188,13 @@ jobs:
           if-no-files-found: error
 
   # ============================
-  # SIGN with Certum SimplySign — bare runner (installs at runtime). Default.
+  # SIGN with Certum SimplySign — runs inside the prebuilt signer container
+  # (SimplySign + jsign + .NET baked in). This is the only signing path; the
+  # caller must grant packages:read so the job's GITHUB_TOKEN can pull the
+  # (internal) image.
   # ============================
   sign:
     needs: build
-    if: inputs.signerImage == ''
-    environment:
-      name: release
-    # Certum SimplySign is GUI middleware with no headless API; the certum-sign
-    # action drives it under Xvfb and signs with jsign over PKCS#11 — Linux only.
-    runs-on: ubuntu-latest
-    # Map the Certum secrets into env so the composite action (which cannot
-    # declare secret-typed inputs) can read them.
-    env:
-      CERTUM_USER_ID: ${{ secrets.CERTUM_USER_ID }}
-      CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
-      CERTUM_CERT_FINGERPRINT: ${{ secrets.CERTUM_CERT_FINGERPRINT }}
-    steps:
-      - name: Download unsigned packages
-        uses: actions/download-artifact@v8
-        with:
-          name: unsigned-nuget
-          path: signed
-
-      - name: Sign packages with Certum SimplySign
-        uses: reactiveui/actions-common/.github/actions/certum-sign@main
-        with:
-          packages-glob: 'signed/*.nupkg'
-          timestamp-url: ${{ inputs.signingTimestampUrl }}
-
-      - name: Upload Signed Packages
-        uses: actions/upload-artifact@v7
-        with:
-          name: signed-nuget
-          path: signed/*.nupkg
-          if-no-files-found: error
-
-  # ============================
-  # SIGN with Certum SimplySign — prebuilt container (fast). Used when
-  # signerImage is set; the caller must grant packages:read so the job's
-  # GITHUB_TOKEN can pull the (internal) image.
-  # ============================
-  sign-container:
-    needs: build
-    if: inputs.signerImage != ''
     # The workflow-level permissions (contents: write) would otherwise strip
     # packages:read from this job's token, so the GHCR image pull gets denied.
     # Override here (still capped by what the caller granted).
@@ -245,12 +203,16 @@ jobs:
       packages: read
     environment:
       name: release
+    # Certum SimplySign is GUI middleware with no headless API; the certum-sign
+    # action drives it under Xvfb and signs with jsign over PKCS#11 — Linux only.
     runs-on: ubuntu-latest
     container:
-      image: ${{ inputs.signerImage }}
+      image: ghcr.io/reactiveui/certum-signer:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+    # Map the Certum secrets into env so the composite action (which cannot
+    # declare secret-typed inputs) can read them.
     env:
       CERTUM_USER_ID: ${{ secrets.CERTUM_USER_ID }}
       CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
