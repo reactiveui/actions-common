@@ -66,15 +66,40 @@ runs:
           sudo apt-get install -y --no-install-recommends "$p" || echo "::warning::could not install $p"
         done
 
-    - name: Download + install SimplySign Desktop
+    - name: Resolve installer cache key
+      id: sscache
       shell: bash
       env:
         SS_BIN_URL: ${{ inputs.simplysign-bin-url }}
       run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/ss-installer"
+        # Key on the installer URL (which encodes the version) — Certum's EU file
+        # host is slow, so a hit avoids re-downloading the multi-MB .bin.
+        echo "key=simplysign-installer-$(printf '%s' "$SS_BIN_URL" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        echo "dir=$RUNNER_TEMP/ss-installer" >> "$GITHUB_OUTPUT"
+
+    - name: Cache SimplySign installer
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.sscache.outputs.dir }}
+        key: ${{ steps.sscache.outputs.key }}
+
+    - name: Download + install SimplySign Desktop
+      shell: bash
+      env:
+        SS_BIN_URL: ${{ inputs.simplysign-bin-url }}
+        SS_INSTALLER_DIR: ${{ steps.sscache.outputs.dir }}
+      run: |
         set -euxo pipefail
-        cd "$RUNNER_TEMP"
-        curl -fsSL -o ss.bin "$SS_BIN_URL"
-        yes yes | sh ss.bin --target "$HOME/certum" || true
+        BIN="$SS_INSTALLER_DIR/SimplySignDesktop.bin"
+        if [ -s "$BIN" ]; then
+          echo "Using cached SimplySign installer ($BIN)"
+        else
+          echo "Cache miss — downloading SimplySign installer from Certum"
+          curl -fsSL -o "$BIN" "$SS_BIN_URL"
+        fi
+        yes yes | sh "$BIN" --target "$HOME/certum" || true
         DIST="$(find "$HOME/certum" -maxdepth 1 -type d -name 'SSD-*-dist' | head -1)"
         {
           echo "SS_DIST=$DIST"
