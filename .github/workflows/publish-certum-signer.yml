@@ -1,0 +1,44 @@
+name: Publish Certum signer image
+
+# Builds the prebuilt Certum SimplySign signing image and pushes it to GHCR.
+# The release sign job pulls this instead of installing SimplySign + the X/Qt
+# stack + jsign on every run. Run manually, or automatically when the Dockerfile
+# (or this workflow) changes on main.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/certum-signer/Dockerfile'
+      - '.github/workflows/publish-certum-signer.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/reactiveui/certum-signer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Log in to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      - name: Build and push image
+        run: |
+          set -euxo pipefail
+          TAG_SHA="$(date +%Y%m%d)-${GITHUB_SHA::7}"
+          docker build \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:$TAG_SHA" \
+            docker/certum-signer
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:$TAG_SHA"
+          echo "Pushed $IMAGE:latest and $IMAGE:$TAG_SHA"
