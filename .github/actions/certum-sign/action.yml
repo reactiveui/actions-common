@@ -87,7 +87,7 @@ runs:
 
     - name: Cache SimplySign installer
       if: ${{ inputs.prebuilt != 'true' }}
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ steps.sscache.outputs.dir }}
         key: ${{ steps.sscache.outputs.key }}
