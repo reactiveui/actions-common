@@ -1,4 +1,7 @@
-name: Common .NET build and release workflow
+# Legacy SSL.com eSigner workflow.
+# Retained only as a fallback.
+# Normal release callers should use workflow-common-release.yml, which signs with Certum.
+name: Common .NET build and release workflow - SSL.com legacy
 
 permissions:
   contents: write
@@ -68,28 +71,24 @@ on:
         default: false
         description: 'Enable UNO-specific msbuild/pack flow (Windows only)'
 
-      signingTimestampUrl:
-        type: string
-        default: 'http://time.certum.pl'
-        description: 'RFC3161 timestamp server URL used when signing NuGet packages'
-
     outputs:
       semver2:
         description: 'SemVer2 version string from the chosen versioning tool (NBGV or MinVer).'
         value: ${{ jobs.build-sign-release.outputs.semver2 }}
 
     secrets:
-      CERTUM_USER_ID:
+      ES_USERNAME:
         required: true
-        description: 'Certum SimplySign login username'
-
-      CERTUM_OTP_URI:
+        description: 'SSL.com eSigner account username'
+      ES_PASSWORD:
         required: true
-        description: 'Full otpauth:// URI for Certum SimplySign TOTP'
-
-      CERTUM_CERT_FINGERPRINT:
+        description: 'SSL.com eSigner account password'
+      CREDENTIAL_ID:
         required: true
-        description: 'SHA-256 fingerprint of the Certum code-signing certificate'
+        description: 'SSL.com eSigner credential ID for the signing certificate'
+      ES_TOTP_SECRET:
+        required: true
+        description: 'SSL.com eSigner TOTP secret for automated two-factor authentication'
 
 jobs:
   # ============================
@@ -98,17 +97,9 @@ jobs:
   build-sign-release:
     environment:
       name: release
-    # Certum SimplySign uses virtual keycard middleware and must run on Windows.
     runs-on: windows-latest
     outputs:
       semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
-    # Surface the Certum secrets to every step in this job so the
-    # connect-certum-simplysign composite action (composite actions cannot
-    # declare secret-typed inputs) and the signing step read them from env.
-    env:
-      CERTUM_USER_ID: ${{ secrets.CERTUM_USER_ID }}
-      CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
-      CERTUM_CERT_FINGERPRINT: ${{ secrets.CERTUM_CERT_FINGERPRINT }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -153,34 +144,19 @@ jobs:
         working-directory: ${{ inputs.srcFolder }}
         run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }} -o "${GITHUB_WORKSPACE}/packages"
 
-      - name: Install and connect Certum SimplySign
-        uses: reactiveui/actions-common/.github/actions/connect-certum-simplysign@main
-
-      - name: Prepare signed package output
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path signed | Out-Null
-          Copy-Item packages\*.nupkg signed\ -Force
-
-      - name: Sign NuGet packages with Certum SimplySign
-        shell: pwsh
-        run: |
-          $fingerprint = ($env:CERTUM_CERT_FINGERPRINT -replace '[^0-9a-fA-F]', '').ToUpperInvariant()
-
-          dotnet nuget sign "signed/*.nupkg" `
-            --certificate-fingerprint "$fingerprint" `
-            --certificate-store-location CurrentUser `
-            --certificate-store-name My `
-            --hash-algorithm SHA256 `
-            --timestamp-hash-algorithm SHA256 `
-            --timestamper "${{ inputs.signingTimestampUrl }}" `
-            --overwrite `
-            --verbosity detailed
-
-      - name: Verify signed NuGet packages
-        shell: pwsh
-        run: |
-          dotnet nuget verify "signed/*.nupkg" --all
+      - name: Sign packages with SSL.com eSigner
+        uses: SSLcom/esigner-codesign@v1.3.2
+        with:
+          command: batch_sign
+          username: ${{ secrets.ES_USERNAME }}
+          password: ${{ secrets.ES_PASSWORD }}
+          credential_id: ${{ secrets.CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+          dir_path: packages
+          output_path: signed
+          malware_block: true
+          environment_name: PROD
+          jvm_max_memory: 2048M
 
       - name: Upload Signed Packages
         uses: actions/upload-artifact@v7

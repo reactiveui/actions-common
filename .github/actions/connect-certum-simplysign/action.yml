@@ -1,0 +1,254 @@
+name: Connect Certum SimplySign
+description: |
+  Install Certum SimplySign Desktop middleware, generate a TOTP from the
+  configured otpauth URI, log in, and wait for the Certum cloud code-signing
+  certificate to appear in Cert:\CurrentUser\My so that a later `dotnet nuget
+  sign` step can use it.
+
+  Certum SimplySign uses virtual keycard middleware and must run on Windows.
+
+  Credentials are read from the environment, not from action inputs — composite
+  actions cannot declare secret-typed inputs. Map these secrets into env at the
+  calling job/step level (standard GitHub Actions secrets.* expression syntax)
+  so the values flow through the GitHub Actions secret-masking pipeline:
+    - CERTUM_USER_ID            Certum SimplySign login username
+    - CERTUM_OTP_URI            Full otpauth:// URI for the SimplySign TOTP
+    - CERTUM_CERT_FINGERPRINT   SHA-256 fingerprint of the signing certificate
+
+runs:
+  using: composite
+  steps:
+    - name: Install Certum SimplySign Desktop
+      shell: pwsh
+      run: |
+        winget install -e --id Certum.SmartSignSimplySignDesktop `
+          --silent `
+          --accept-package-agreements `
+          --accept-source-agreements
+
+    - name: Connect Certum SimplySign
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+
+        function Normalize-Hex([string]$value) {
+            return ($value -replace '[^0-9a-fA-F]', '').ToUpperInvariant()
+        }
+
+        function Get-CertSha256([System.Security.Cryptography.X509Certificates.X509Certificate2]$cert) {
+            return [Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData($cert.RawData)
+            )
+        }
+
+        function ConvertFrom-Base32([string]$base32) {
+            $alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+            $clean = ($base32 -replace '\s', '').TrimEnd('=').ToUpperInvariant()
+
+            $bits = New-Object System.Text.StringBuilder
+
+            foreach ($char in $clean.ToCharArray()) {
+                $value = $alphabet.IndexOf($char)
+                if ($value -lt 0) {
+                    throw "Invalid Base32 character in TOTP secret."
+                }
+
+                [void]$bits.Append([Convert]::ToString($value, 2).PadLeft(5, '0'))
+            }
+
+            $bytes = New-Object System.Collections.Generic.List[byte]
+
+            for ($i = 0; $i + 8 -le $bits.Length; $i += 8) {
+                $bytes.Add([Convert]::ToByte($bits.ToString($i, 8), 2))
+            }
+
+            return $bytes.ToArray()
+        }
+
+        function Get-QueryParameters([Uri]$uri) {
+            $result = @{}
+
+            $query = $uri.Query
+            if ($query.StartsWith("?")) {
+                $query = $query.Substring(1)
+            }
+
+            foreach ($pair in $query.Split("&", [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                $parts = $pair.Split("=", 2)
+                $key = [Uri]::UnescapeDataString($parts[0])
+                $value = if ($parts.Length -gt 1) { [Uri]::UnescapeDataString($parts[1]) } else { "" }
+                $result[$key] = $value
+            }
+
+            return $result
+        }
+
+        function Get-TotpFromUri([string]$otpUri) {
+            $uri = [Uri]$otpUri
+            $query = Get-QueryParameters $uri
+
+            if (-not $query.ContainsKey("secret")) {
+                throw "TOTP URI does not contain a secret parameter."
+            }
+
+            $secret = $query["secret"]
+            $digits = if ($query.ContainsKey("digits")) { [int]$query["digits"] } else { 6 }
+            $period = if ($query.ContainsKey("period")) { [int]$query["period"] } else { 30 }
+            $algorithm = if ($query.ContainsKey("algorithm")) { $query["algorithm"].ToUpperInvariant() } else { "SHA1" }
+
+            $key = ConvertFrom-Base32 $secret
+
+            $counter = [int64]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / $period)
+            $counterBytes = [BitConverter]::GetBytes($counter)
+
+            if ([BitConverter]::IsLittleEndian) {
+                [Array]::Reverse($counterBytes)
+            }
+
+            switch ($algorithm) {
+                "SHA1" {
+                    $hmac = [System.Security.Cryptography.HMACSHA1]::new($key)
+                }
+                "SHA256" {
+                    $hmac = [System.Security.Cryptography.HMACSHA256]::new($key)
+                }
+                "SHA512" {
+                    $hmac = [System.Security.Cryptography.HMACSHA512]::new($key)
+                }
+                default {
+                    throw "Unsupported TOTP algorithm: $algorithm"
+                }
+            }
+
+            $hash = $hmac.ComputeHash($counterBytes)
+            $offset = $hash[$hash.Length - 1] -band 0x0F
+
+            $binary =
+                (($hash[$offset] -band 0x7F) -shl 24) -bor
+                (($hash[$offset + 1] -band 0xFF) -shl 16) -bor
+                (($hash[$offset + 2] -band 0xFF) -shl 8) -bor
+                ($hash[$offset + 3] -band 0xFF)
+
+            $otp = $binary % [Math]::Pow(10, $digits)
+
+            return ([int]$otp).ToString().PadLeft($digits, "0")
+        }
+
+        function Paste-Text([string]$text) {
+            Set-Clipboard -Value $text
+            Start-Sleep -Milliseconds 200
+
+            $wshell = New-Object -ComObject WScript.Shell
+            $wshell.SendKeys("^v")
+            Start-Sleep -Milliseconds 200
+        }
+
+        if (-not $env:CERTUM_USER_ID) {
+            throw "CERTUM_USER_ID is not set."
+        }
+
+        if (-not $env:CERTUM_OTP_URI) {
+            throw "CERTUM_OTP_URI is not set."
+        }
+
+        if (-not $env:CERTUM_CERT_FINGERPRINT) {
+            throw "CERTUM_CERT_FINGERPRINT is not set."
+        }
+
+        $targetFingerprint = Normalize-Hex $env:CERTUM_CERT_FINGERPRINT
+        $otp = Get-TotpFromUri $env:CERTUM_OTP_URI
+
+        Write-Host "Generated Certum SimplySign TOTP."
+
+        $knownPaths = @(
+            "$env:ProgramFiles\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+            "$env:ProgramFiles\Certum\SimplySign Desktop\proCertumSmartSign.exe",
+            "$env:ProgramFiles\Certum\proCertum SmartSign\proCertumSmartSign.exe",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\SimplySignDesktop.exe",
+            "${env:ProgramFiles(x86)}\Certum\SimplySign Desktop\proCertumSmartSign.exe"
+        )
+
+        $exe = $knownPaths |
+            Where-Object { $_ -and (Test-Path $_) } |
+            Select-Object -First 1
+
+        if (-not $exe) {
+            $exe = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)} `
+                -Filter "*SimplySign*.exe" `
+                -Recurse `
+                -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty FullName -First 1
+        }
+
+        if (-not $exe) {
+            throw "Could not find Certum SimplySign Desktop executable."
+        }
+
+        Write-Host "Starting Certum SimplySign Desktop: $exe"
+        Start-Process -FilePath $exe | Out-Null
+        Start-Sleep -Seconds 10
+
+        $wshell = New-Object -ComObject WScript.Shell
+
+        $focused = $false
+
+        foreach ($attempt in 1..30) {
+            foreach ($title in @("SimplySign Desktop", "Certum", "Certum Identity Provider", "Logowanie")) {
+                if ($wshell.AppActivate($title)) {
+                    $focused = $true
+                    break
+                }
+            }
+
+            if ($focused) {
+                break
+            }
+
+            Start-Sleep -Milliseconds 500
+        }
+
+        if (-not $focused) {
+            throw "Could not focus the Certum SimplySign login window."
+        }
+
+        # This assumes a fresh runner with username field followed by token field.
+        # If Certum changes the UI, adjust this section.
+        Start-Sleep -Milliseconds 500
+
+        Paste-Text $env:CERTUM_USER_ID
+        $wshell.SendKeys("{TAB}")
+        Start-Sleep -Milliseconds 200
+
+        Paste-Text $otp
+        $wshell.SendKeys("{ENTER}")
+
+        Write-Host "Submitted Certum SimplySign login. Waiting for signing certificate."
+
+        $found = $null
+
+        foreach ($attempt in 1..90) {
+            $found = Get-ChildItem Cert:\CurrentUser\My |
+                Where-Object {
+                    $_.HasPrivateKey -and
+                    (
+                        (Get-CertSha256 $_) -eq $targetFingerprint -or
+                        (Normalize-Hex $_.Thumbprint) -eq $targetFingerprint
+                    )
+                } |
+                Select-Object -First 1
+
+            if ($found) {
+                break
+            }
+
+            Start-Sleep -Seconds 2
+        }
+
+        if (-not $found) {
+            throw "Certum signing certificate did not appear in Cert:\CurrentUser\My."
+        }
+
+        Write-Host "Certum signing certificate is available in Cert:\CurrentUser\My."
+        Write-Host "Subject: $($found.Subject)"
+        Write-Host "SHA1 thumbprint: $($found.Thumbprint)"
+        Write-Host "SHA256 fingerprint: $(Get-CertSha256 $found)"
