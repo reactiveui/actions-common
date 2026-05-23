@@ -32,30 +32,25 @@ on:
         default: 'src'
         description: 'Folder containing the solution'
 
-      versioningTool:
-        type: string
-        default: ''
-        description: 'DEPRECATED no-op — MinVer is always used now. Retained so existing callers passing this do not break.'
-
       minverMinimumMajorMinor:
         type: string
         default: ''
-        description: 'When versioningTool=minver: floor major.minor when no tag is reachable.'
+        description: 'floor major.minor when no tag is reachable.'
 
       minverTagPrefix:
         type: string
         default: 'v'
-        description: 'When versioningTool=minver: git tag prefix MinVer expects.'
+        description: 'git tag prefix MinVer expects.'
 
       minverAutoIncrement:
         type: string
         default: 'minor'
-        description: 'When versioningTool=minver: auto-increment segment (major|minor|patch).'
+        description: 'auto-increment segment (major|minor|patch).'
 
       minverDefaultPreReleaseIdentifiers:
         type: string
         default: 'alpha.0'
-        description: 'When versioningTool=minver: pre-release identifier(s) for height-only builds.'
+        description: 'pre-release identifier(s) for height-only builds.'
 
       installWorkloads:
         type: boolean
@@ -84,7 +79,7 @@ on:
 
     outputs:
       semver2:
-        description: 'SemVer2 version string from the chosen versioning tool (NBGV or MinVer).'
+        description: 'MinVer SemVer2 version string.'
         value: ${{ jobs.build.outputs.semver2 }}
       tag:
         description: 'Tag pushed for a bump release (e.g. v2.4.0). Empty for CI builds.'

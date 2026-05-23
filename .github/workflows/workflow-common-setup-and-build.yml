@@ -44,30 +44,25 @@ on:
         default: true
         description: 'Run tests + collect coverage on each OS'
 
-      versioningTool:
-        type: string
-        default: ''
-        description: 'DEPRECATED no-op — MinVer is always used now. Retained so existing callers passing this do not break.'
-
       minverMinimumMajorMinor:
         type: string
         default: ''
-        description: 'When versioningTool=minver: floor major.minor when no tag is reachable (e.g. "1.0").'
+        description: 'floor major.minor when no tag is reachable (e.g. "1.0").'
 
       minverTagPrefix:
         type: string
         default: 'v'
-        description: 'When versioningTool=minver: git tag prefix MinVer expects.'
+        description: 'git tag prefix MinVer expects.'
 
       minverAutoIncrement:
         type: string
         default: 'minor'
-        description: 'When versioningTool=minver: auto-increment segment (major|minor|patch).'
+        description: 'auto-increment segment (major|minor|patch).'
 
       minverDefaultPreReleaseIdentifiers:
         type: string
         default: 'alpha.0'
-        description: 'When versioningTool=minver: pre-release identifier(s) for height-only builds.'
+        description: 'pre-release identifier(s) for height-only builds.'
 
       installWorkloads:
         type: boolean
