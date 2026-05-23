@@ -24,7 +24,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Java for jsign, and the Qt5/WebKit + misc system libs SimplySign needs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       xvfb x11-utils xdotool wmctrl fluxbox \
-      opensc opensc-pkcs11 default-jre-headless unzip openssl ca-certificates curl \
+      opensc opensc-pkcs11 default-jre-headless unzip openssl ca-certificates curl python3 \
       libx11-6 libxext6 libxcomposite1 libxi6 libice6 libsm6 libxrender1 \
       libxcb1 libxau6 libpcsclite1 libglx-mesa0 libgl1 libxslt1.1 \
       libxkbcommon0 libxcb-xinerama0 libfontconfig1 libdbus-1-3 procps \
