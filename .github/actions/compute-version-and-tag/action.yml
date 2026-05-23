@@ -1,0 +1,100 @@
+name: Compute version and tag
+description: |
+  Cut a clean RTM version for a tag-first MinVer repo. Given a bump level
+  (major|minor|patch), find the latest RTM tag (<prefix>X.Y.Z, ignoring
+  pre-release tags), increment the requested segment, create and push the new
+  tag on HEAD, and export MINVERVERSIONOVERRIDE so the subsequent build/pack
+  stamps that exact version.
+
+  With an empty bump this action is a no-op: it emits empty outputs and changes
+  nothing, so the normal CI path (MinVer at HEAD producing a pre-release) is
+  unaffected.
+
+  Requires the job to have `contents: write` so the tag can be pushed, and the
+  checkout to include full history + tags (e.g. fetch-depth: 0).
+
+inputs:
+  bump:
+    description: 'Release level: major | minor | patch. Empty = no-op (CI build).'
+    required: false
+    default: ''
+  tag-prefix:
+    description: 'Tag prefix for RTM tags (default v).'
+    required: false
+    default: 'v'
+
+outputs:
+  version:
+    description: 'Computed RTM version (e.g. 2.4.0). Empty when bump is empty.'
+    value: ${{ steps.compute.outputs.version }}
+  tag:
+    description: 'Pushed tag, prefix included (e.g. v2.4.0). Empty when bump is empty.'
+    value: ${{ steps.compute.outputs.tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute next RTM version and push tag
+      id: compute
+      shell: bash
+      env:
+        BUMP: ${{ inputs.bump }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$BUMP" ]; then
+          echo "No bump requested; skipping version/tag computation (CI pre-release path)."
+          exit 0
+        fi
+
+        case "$BUMP" in
+          major|minor|patch) ;;
+          *)
+            echo "::error::bump must be one of major|minor|patch (got '$BUMP')."
+            exit 1 ;;
+        esac
+
+        # Latest RTM tag: <prefix>X.Y.Z, excluding any pre-release tag (those
+        # contain a hyphen) and any bare/unprefixed tags. sort -V orders by
+        # version so tail -1 is the highest.
+        LAST="$(git tag --list "${TAG_PREFIX}[0-9]*.[0-9]*.[0-9]*" \
+                | grep -Ev -- '-' \
+                | sort -V \
+                | tail -1 \
+                | sed "s/^${TAG_PREFIX}//")"
+
+        if [ -z "$LAST" ]; then
+          echo "::error::No RTM tag (${TAG_PREFIX}X.Y.Z) found in history. Tag the first release manually before using a bump release."
+          exit 1
+        fi
+
+        IFS=. read -r MAJ MIN PAT <<< "$LAST"
+
+        case "$BUMP" in
+          major) VERSION="$((MAJ + 1)).0.0" ;;
+          minor) VERSION="${MAJ}.$((MIN + 1)).0" ;;
+          patch) VERSION="${MAJ}.${MIN}.$((PAT + 1))" ;;
+        esac
+
+        TAG="${TAG_PREFIX}${VERSION}"
+        echo "Latest RTM tag: ${TAG_PREFIX}${LAST} -> next (${BUMP}): ${TAG}"
+
+        if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+          echo "::error::Tag ${TAG} already exists. Refusing to re-release an existing version."
+          exit 1
+        fi
+
+        git config user.name 'github-actions[bot]'
+        git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        git tag "$TAG"
+        git push origin "$TAG"
+
+        # Stamp every downstream MSBuild project with this exact version and skip
+        # MinVer's per-project git walk.
+        echo "MINVERVERSIONOVERRIDE=${VERSION}" >> "$GITHUB_ENV"
+
+        {
+          echo "version=${VERSION}"
+          echo "tag=${TAG}"
+        } >> "$GITHUB_OUTPUT"

@@ -73,10 +73,18 @@ on:
         default: 'http://time.certum.pl'
         description: 'RFC3161 timestamp server URL used when signing NuGet packages'
 
+      bump:
+        type: string
+        default: ''
+        description: 'Release level (major|minor|patch) to cut a clean RTM version and push a tag before building. Empty = normal CI build (MinVer pre-release at HEAD, no tag).'
+
     outputs:
       semver2:
         description: 'SemVer2 version string from the chosen versioning tool (NBGV or MinVer).'
         value: ${{ jobs.build-sign-release.outputs.semver2 }}
+      tag:
+        description: 'Tag pushed for a bump release (e.g. v2.4.0). Empty for CI builds.'
+        value: ${{ jobs.build-sign-release.outputs.tag }}
 
     secrets:
       CERTUM_USER_ID:
@@ -102,6 +110,7 @@ jobs:
     runs-on: windows-latest
     outputs:
       semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
+      tag: ${{ steps.bump.outputs.tag }}
     # Surface the Certum secrets to every step in this job so the
     # connect-certum-simplysign composite action (composite actions cannot
     # declare secret-typed inputs) and the signing step read them from env.
@@ -115,6 +124,17 @@ jobs:
         with:
           fetch-depth: 0
           lfs: true
+
+      # For a bump release: compute the next clean RTM version, push the vX.Y.Z
+      # tag, and export MINVERVERSIONOVERRIDE so the MinVer step below stamps it.
+      # Skipped (no-op) for normal CI builds where bump is empty.
+      - name: Compute version and tag
+        if: inputs.bump != ''
+        id: bump
+        uses: reactiveui/actions-common/.github/actions/compute-version-and-tag@main
+        with:
+          bump: ${{ inputs.bump }}
+          tag-prefix: ${{ inputs.minverTagPrefix }}
 
       - name: Setup .NET Environment
         id: environment

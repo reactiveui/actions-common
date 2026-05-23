@@ -9,7 +9,12 @@ on:
       version:
         type: string
         required: true
-        description: 'Version string used for the release tag, title, and release notes heading'
+        description: 'Version string used for the release title and release notes heading'
+
+      tag:
+        type: string
+        default: ''
+        description: 'Git tag to attach the release to (e.g. v2.4.0). Defaults to version when empty (back-compat).'
 
       artifactName:
         type: string
@@ -43,4 +48,4 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ inputs.version }}" --repo "${{ github.repository }}" --title "${{ inputs.version }}" --notes-file release-notes.md ./signed/*.nupkg
+        run: gh release create "${{ inputs.tag != '' && inputs.tag || inputs.version }}" --repo "${{ github.repository }}" --title "${{ inputs.version }}" --notes-file release-notes.md ./signed/*.nupkg
