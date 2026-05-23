@@ -22,6 +22,10 @@ inputs:
     description: 'Tag prefix for RTM tags (default v).'
     required: false
     default: 'v'
+  push-tag:
+    description: 'true = create and push the tag now. false = only compute the version + export MINVERVERSIONOVERRIDE and emit the tag name, leaving tag creation to a later step (e.g. GitHub release creation), so a failed build/sign/publish does not leave an orphan tag.'
+    required: false
+    default: 'true'
 
 outputs:
   version:
@@ -40,6 +44,7 @@ runs:
       env:
         BUMP: ${{ inputs.bump }}
         TAG_PREFIX: ${{ inputs.tag-prefix }}
+        PUSH_TAG: ${{ inputs.push-tag }}
       run: |
         set -euo pipefail
 
@@ -85,10 +90,15 @@ runs:
           exit 1
         fi
 
-        git config user.name 'github-actions[bot]'
-        git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-        git tag "$TAG"
-        git push origin "$TAG"
+        if [ "${PUSH_TAG}" = "true" ]; then
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Pushed tag ${TAG}."
+        else
+          echo "push-tag=false: computed ${TAG} but not creating it now (deferred, e.g. to GitHub release creation)."
+        fi
 
         # Stamp every downstream MSBuild project with this exact version and skip
         # MinVer's per-project git walk.

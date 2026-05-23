@@ -45,7 +45,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: git-release-notes --release-version "${{ inputs.version }}" --output-file release-notes.md
 
+      # Creates the tag too: workflow-common-release.yml no longer pushes it up
+      # front (so a failed build/sign/publish leaves no orphan tag). --target pins
+      # the new tag to the exact commit this run built.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ inputs.tag != '' && inputs.tag || inputs.version }}" --repo "${{ github.repository }}" --title "${{ inputs.version }}" --notes-file release-notes.md ./signed/*.nupkg
+        run: gh release create "${{ inputs.tag != '' && inputs.tag || inputs.version }}" --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "${{ inputs.version }}" --notes-file release-notes.md ./signed/*.nupkg

@@ -132,6 +132,9 @@ jobs:
       # For a bump release: compute the next clean RTM version, push the vX.Y.Z
       # tag, and export MINVERVERSIONOVERRIDE so the MinVer step below stamps it.
       # Skipped (no-op) for normal CI builds where bump is empty.
+      # Compute the version + export MINVERVERSIONOVERRIDE for build/pack, but DON'T
+      # create the tag yet — the tag is pushed by create-release at the end, so a
+      # failed build/sign/publish never leaves an orphan tag.
       - name: Compute version and tag
         if: inputs.bump != ''
         id: bump
@@ -139,6 +142,7 @@ jobs:
         with:
           bump: ${{ inputs.bump }}
           tag-prefix: ${{ inputs.minverTagPrefix }}
+          push-tag: 'false'
 
       - name: Setup .NET Environment
         id: environment
