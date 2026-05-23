@@ -37,12 +37,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libegl1 libgbm1 libxkbcommon-x11-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install SimplySign Desktop (extract the self-installing .bin), then drop the
-# installer to keep the layer smaller. Symlink the versioned dist to a stable path.
+# Install SimplySign Desktop. The bundled SimplySignDesktop_start wrapper
+# hardcodes /opt/SimplySignDesktop/SimplySignDesktop, so the dist MUST live there
+# (mirrors hpvb/certum-container). Extract to a temp dir, then move the dist into
+# place and drop the installer + temp to keep the layer smaller.
 RUN curl -fsSL -o /tmp/ss.bin "$SIMPLYSIGN_BIN_URL" \
-    && (yes yes | sh /tmp/ss.bin --target /opt/certum || true) \
-    && rm -f /tmp/ss.bin \
-    && ln -s "$(find /opt/certum -maxdepth 1 -type d -name 'SSD-*-dist' | head -1)" /opt/simplysign
+    && mkdir -p /tmp/ss-extract \
+    && (yes yes | sh /tmp/ss.bin --target /tmp/ss-extract || true) \
+    && mv "$(find /tmp/ss-extract -maxdepth 1 -type d -name 'SSD-*-dist' | head -1)" /opt/SimplySignDesktop \
+    && rm -rf /tmp/ss.bin /tmp/ss-extract \
+    && test -x /opt/SimplySignDesktop/SimplySignDesktop
 
 # jsign (signs .nupkg over PKCS#11).
 RUN curl -fsSL -o /opt/jsign.jar "https://repo1.maven.org/maven2/net/jsign/jsign/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
@@ -50,9 +54,9 @@ RUN curl -fsSL -o /opt/jsign.jar "https://repo1.maven.org/maven2/net/jsign/jsign
 # Contract consumed by the certum-sign action when it detects the prebuilt image:
 # skip the apt/SimplySign/jsign install and use these baked-in paths.
 ENV CERTUM_PREBUILT=1 \
-    SS_DIST=/opt/simplysign \
+    SS_DIST=/opt/SimplySignDesktop \
     JSIGN_JAR=/opt/jsign.jar \
-    LD_LIBRARY_PATH=/opt/simplysign
+    LD_LIBRARY_PATH=/opt/SimplySignDesktop
 
 LABEL org.opencontainers.image.title="Certum SimplySign signer" \
       org.opencontainers.image.description="SimplySign Desktop + jsign + .NET SDK for headless NuGet signing on Linux" \
