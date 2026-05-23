@@ -155,6 +155,12 @@ runs:
         : "${CERTUM_USER_ID:?map the CERTUM_USER_ID secret into the job env}"
         : "${CERTUM_OTP_URI:?map the CERTUM_OTP_URI secret into the job env}"
 
+        # SimplySignDesktop reads $USER at startup and segfaults (NULL deref in
+        # its bundled OpenSSL) when it is unset. Containers don't set $USER (the
+        # GitHub VM runner does), so default it here or the login window never
+        # appears — the process crashes before drawing it.
+        export USER="${USER:-root}"
+
         # SimplySign needs its config near $HOME + the logon-dialog preference,
         # otherwise it shows a "Critical error" on launch.
         cp "$SS_DIST/SimplySignDesktop.xml" "$HOME/" 2>/dev/null || true

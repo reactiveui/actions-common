@@ -53,7 +53,12 @@ RUN curl -fsSL -o /opt/jsign.jar "https://repo1.maven.org/maven2/net/jsign/jsign
 
 # Contract consumed by the certum-sign action when it detects the prebuilt image:
 # skip the apt/SimplySign/jsign install and use these baked-in paths.
+#
+# USER=root: SimplySignDesktop reads $USER at startup and segfaults (NULL deref
+# in its bundled OpenSSL) when it is unset. Container jobs don't set $USER, so
+# bake a default in — without it the login window never appears.
 ENV CERTUM_PREBUILT=1 \
+    USER=root \
     SS_DIST=/opt/SimplySignDesktop \
     JSIGN_JAR=/opt/jsign.jar \
     LD_LIBRARY_PATH=/opt/SimplySignDesktop
