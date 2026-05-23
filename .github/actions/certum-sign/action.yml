@@ -37,11 +37,16 @@ inputs:
     description: 'Seconds to wait after launching SimplySign before driving the UI.'
     required: false
     default: '20'
+  prebuilt:
+    description: 'Set to true when running inside the prebuilt certum-signer image (SimplySign + jsign + deps baked in). Skips the install/download steps and uses $SS_DIST / $JSIGN_JAR from the image.'
+    required: false
+    default: 'false'
 
 runs:
   using: composite
   steps:
     - name: Install SimplySign + X + signing tooling
+      if: ${{ inputs.prebuilt != 'true' }}
       shell: bash
       run: |
         set -euxo pipefail
@@ -67,6 +72,7 @@ runs:
         done
 
     - name: Resolve installer cache key
+      if: ${{ inputs.prebuilt != 'true' }}
       id: sscache
       shell: bash
       env:
@@ -80,12 +86,14 @@ runs:
         echo "dir=$RUNNER_TEMP/ss-installer" >> "$GITHUB_OUTPUT"
 
     - name: Cache SimplySign installer
+      if: ${{ inputs.prebuilt != 'true' }}
       uses: actions/cache@v4
       with:
         path: ${{ steps.sscache.outputs.dir }}
         key: ${{ steps.sscache.outputs.key }}
 
     - name: Download + install SimplySign Desktop
+      if: ${{ inputs.prebuilt != 'true' }}
       shell: bash
       env:
         SS_BIN_URL: ${{ inputs.simplysign-bin-url }}
@@ -106,6 +114,22 @@ runs:
           echo "SS_START=$(find "$HOME/certum" -name 'SimplySignDesktop_start' -type f | head -1)"
           echo "SS_EXE=$(find "$HOME/certum" -name 'SimplySignDesktop' -type f | head -1)"
           echo "SS_PKCS11=$(find "$HOME/certum" -name 'SimplySignPKCS*.so' | head -1)"
+        } >> "$GITHUB_ENV"
+
+    - name: Resolve prebuilt SimplySign paths
+      if: ${{ inputs.prebuilt == 'true' }}
+      shell: bash
+      run: |
+        set -euxo pipefail
+        # In the prebuilt image SimplySign lives at $SS_DIST and jsign at
+        # $JSIGN_JAR (set via Dockerfile ENV). Derive the exe/wrapper/PKCS#11
+        # paths and export them for the connect + sign steps.
+        : "${SS_DIST:?prebuilt image must set SS_DIST}"
+        {
+          echo "SS_DIST=$SS_DIST"
+          echo "SS_START=$(find "$SS_DIST/" -name 'SimplySignDesktop_start' -type f | head -1)"
+          echo "SS_EXE=$(find "$SS_DIST/" -name 'SimplySignDesktop' -type f | head -1)"
+          echo "SS_PKCS11=$(find "$SS_DIST/" -name 'SimplySignPKCS*.so' | head -1)"
         } >> "$GITHUB_ENV"
 
     - name: Start headless display
@@ -212,8 +236,12 @@ runs:
         PKG_GLOB: ${{ inputs.packages-glob }}
       run: |
         set -euxo pipefail
-        JAR="$RUNNER_TEMP/jsign.jar"
-        curl -fsSL -o "$JAR" "https://repo1.maven.org/maven2/net/jsign/jsign/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+        # Use the jsign baked into the prebuilt image ($JSIGN_JAR) if present,
+        # otherwise download it.
+        JAR="${JSIGN_JAR:-$RUNNER_TEMP/jsign.jar}"
+        if [ ! -s "$JAR" ]; then
+          curl -fsSL -o "$JAR" "https://repo1.maven.org/maven2/net/jsign/jsign/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+        fi
         CONF="$RUNNER_TEMP/sunpkcs11.conf"
         { echo "name = SimplySign"; echo "library = $SS_PKCS11"; echo "slotListIndex = 0"; } > "$CONF"
 
