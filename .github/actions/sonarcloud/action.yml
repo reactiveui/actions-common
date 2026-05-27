@@ -69,12 +69,14 @@ runs:
           exit 1
         fi
 
-    - name: Set up JDK 17 (SonarScanner prerequisite)
+    - name: Set up JDK 21 (SonarScanner prerequisite)
+      # Pin to 21 to match the JRE the scanner would otherwise provision, so
+      # sonar.scanner.skipJreProvisioning=true can reuse it instead of downloading one.
       if: inputs.mode == 'begin'
       uses: actions/setup-java@v5
       with:
         distribution: temurin
-        java-version: '17'
+        java-version: '21'
 
     - name: Install (or update) dotnet-sonarscanner global tool
       if: inputs.mode == 'begin'
@@ -119,6 +121,7 @@ runs:
           $ORG_ARG \
           /d:sonar.host.url="${{ inputs.host-url }}" \
           /d:sonar.token="$SONAR_TOKEN" \
+          /d:sonar.scanner.skipJreProvisioning=true \
           /d:sonar.cs.cobertura.reportsPaths="${{ inputs.coverage-glob }}" \
           $EXCLUSIONS_ARG \
           $COVERAGE_EXCLUSIONS_ARG \
