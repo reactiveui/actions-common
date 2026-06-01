@@ -6,6 +6,10 @@ description: |
   tag on HEAD, and export MINVERVERSIONOVERRIDE so the subsequent build/pack
   stamps that exact version.
 
+  Brand-new repo with no RTM tag yet: the baseline is seeded at 0.0.0, so the
+  first release comes straight from the bump (patch -> 0.0.1, minor -> 0.1.0,
+  major -> 1.0.0) with no manual first tag required.
+
   With an empty bump this action is a no-op: it emits empty outputs and changes
   nothing, so the normal CI path (MinVer at HEAD producing a pre-release) is
   unaffected.
@@ -70,8 +74,12 @@ runs:
                 | sed "s/^${TAG_PREFIX}//")"
 
         if [ -z "$LAST" ]; then
-          echo "::error::No RTM tag (${TAG_PREFIX}X.Y.Z) found in history. Tag the first release manually before using a bump release."
-          exit 1
+          # Brand-new project: no RTM tag in history yet. Seed the baseline at
+          # 0.0.0 so the requested bump produces the first release straight from
+          # the normal bump math (patch -> 0.0.1, minor -> 0.1.0, major -> 1.0.0)
+          # instead of forcing a manual first tag.
+          echo "No RTM tag (${TAG_PREFIX}X.Y.Z) found in history; seeding first release from 0.0.0."
+          LAST="0.0.0"
         fi
 
         IFS=. read -r MAJ MIN PAT <<< "$LAST"
