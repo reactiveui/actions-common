@@ -67,11 +67,14 @@ runs:
         # Latest RTM tag: <prefix>X.Y.Z, excluding any pre-release tag (those
         # contain a hyphen) and any bare/unprefixed tags. sort -V orders by
         # version so tail -1 is the highest.
+        # `|| true` so an empty tag list (brand-new repo) doesn't trip
+        # pipefail/set -e: grep exits 1 on no matches, which would otherwise
+        # abort before the first-release seeding below.
         LAST="$(git tag --list "${TAG_PREFIX}[0-9]*.[0-9]*.[0-9]*" \
                 | grep -Ev -- '-' \
                 | sort -V \
                 | tail -1 \
-                | sed "s/^${TAG_PREFIX}//")"
+                | sed "s/^${TAG_PREFIX}//" || true)"
 
         if [ -z "$LAST" ]; then
           # Brand-new project: no RTM tag in history yet. Seed the baseline at
