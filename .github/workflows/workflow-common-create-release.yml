@@ -21,6 +21,11 @@ on:
         default: 'signed-nuget'
         description: 'Name of the artifact containing .nupkg files to attach to the release'
 
+      target:
+        type: string
+        default: ''
+        description: 'Commit SHA (or branch) the new tag is created from. Empty = the commit that triggered the run (github.sha). Set to the built source SHA when re-releasing historical source so the tag points at that commit.'
+
 jobs:
   # ============================
   # CREATE GITHUB RELEASE (Linux)
@@ -51,4 +56,4 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ inputs.tag != '' && inputs.tag || inputs.version }}" --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "${{ inputs.version }}" --notes-file release-notes.md ./signed/*.nupkg
+        run: gh release create "${{ inputs.tag != '' && inputs.tag || inputs.version }}" --repo "${{ github.repository }}" --target "${{ inputs.target != '' && inputs.target || github.sha }}" --title "${{ inputs.version }}" --notes-file release-notes.md ./signed/*.nupkg

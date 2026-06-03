@@ -77,6 +77,11 @@ on:
         default: 'windows-latest'
         description: 'Runner for the build/pack job (e.g. windows-latest, ubuntu-latest). Certum signing always runs on Linux regardless. Defaults to windows-latest because several projects have Windows-specific build logic.'
 
+      ref:
+        type: string
+        default: ''
+        description: 'Git ref (branch, tag, or SHA) to build/pack. Empty = the ref that triggered the run (normally the default branch). Use this to re-release historical source (e.g. a tag) with the current signing pipeline.'
+
     outputs:
       semver2:
         description: 'MinVer SemVer2 version string.'
@@ -84,6 +89,9 @@ on:
       tag:
         description: 'Tag pushed for a bump release (e.g. v2.4.0). Empty for CI builds.'
         value: ${{ jobs.build.outputs.tag }}
+      sourceSha:
+        description: 'Resolved commit SHA that was actually built (honors the ref input). Pass to workflow-common-create-release as target so the new release tag points at the built commit.'
+        value: ${{ jobs.build.outputs.sourceSha }}
 
     secrets:
       CERTUM_USER_ID:
@@ -111,12 +119,21 @@ jobs:
     outputs:
       semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
       tag: ${{ steps.bump.outputs.tag }}
+      sourceSha: ${{ steps.sourcesha.outputs.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          # Empty ref => checkout's default (the triggering ref). A branch/tag/SHA
+          # here re-releases historical source with the current signing pipeline.
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
           lfs: true
+
+      - name: Resolve built commit SHA
+        id: sourcesha
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       # For a bump release: compute the next clean RTM version, push the vX.Y.Z
       # tag, and export MINVERVERSIONOVERRIDE so the MinVer step below stamps it.
