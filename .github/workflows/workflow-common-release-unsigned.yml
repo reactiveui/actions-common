@@ -17,6 +17,7 @@ on:
           8.0.x
           9.0.x
           10.0.x
+          11.0.x
         description: 'Newline-separated list of .NET SDKs'
 
       solutionFile:
