@@ -18,6 +18,10 @@ inputs:
     description: 'Which segment MinVer should auto-increment when no tag is reachable (major|minor|patch).'
     required: false
     default: 'minor'
+  version-override:
+    description: 'Exact version to stamp, bypassing the MinVer git walk entirely (e.g. "11.4.13" for an out-of-sequence / backport release whose number does not follow from the latest reachable tag). Empty = compute the version from git tags as normal.'
+    required: false
+    default: ''
   verbosity:
     description: 'MinVer CLI verbosity (error|warn|info|debug|trace).'
     required: false
@@ -56,6 +60,9 @@ runs:
   using: composite
   steps:
     - name: Install (or update) minver-cli global tool
+      # Skip the tool install on the override path — no git walk happens, so the
+      # CLI is never invoked.
+      if: inputs.version-override == ''
       shell: bash
       run: |
         echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
@@ -72,17 +79,26 @@ runs:
         DEFAULT_PRE_RELEASE: ${{ inputs.default-pre-release-identifiers }}
         AUTO_INCREMENT: ${{ inputs.auto-increment }}
         VERBOSITY: ${{ inputs.verbosity }}
+        VERSION_OVERRIDE: ${{ inputs.version-override }}
       run: |
-        ARGS=(--tag-prefix "$TAG_PREFIX" --verbosity "$VERBOSITY" --auto-increment "$AUTO_INCREMENT")
-        if [ -n "$MINIMUM_MAJOR_MINOR" ]; then
-          ARGS+=(--minimum-major-minor "$MINIMUM_MAJOR_MINOR")
-        fi
-        if [ -n "$DEFAULT_PRE_RELEASE" ]; then
-          ARGS+=(--default-pre-release-identifiers "$DEFAULT_PRE_RELEASE")
-        fi
+        if [ -n "$VERSION_OVERRIDE" ]; then
+          # Out-of-sequence / backport release: take the version verbatim and
+          # skip the MinVer git walk. Everything below derives from SEMVER2, so
+          # all outputs (and MINVERVERSIONOVERRIDE for MSBuild) stay consistent.
+          SEMVER2="$VERSION_OVERRIDE"
+          echo "Version override supplied; skipping MinVer git walk. Using: $SEMVER2"
+        else
+          ARGS=(--tag-prefix "$TAG_PREFIX" --verbosity "$VERBOSITY" --auto-increment "$AUTO_INCREMENT")
+          if [ -n "$MINIMUM_MAJOR_MINOR" ]; then
+            ARGS+=(--minimum-major-minor "$MINIMUM_MAJOR_MINOR")
+          fi
+          if [ -n "$DEFAULT_PRE_RELEASE" ]; then
+            ARGS+=(--default-pre-release-identifiers "$DEFAULT_PRE_RELEASE")
+          fi
 
-        SEMVER2=$(minver "${ARGS[@]}")
-        echo "MinVer produced: $SEMVER2"
+          SEMVER2=$(minver "${ARGS[@]}")
+          echo "MinVer produced: $SEMVER2"
+        fi
 
         # Derive the rest by parsing SEMVER2: "<major>.<minor>.<patch>[-<pre>][+<meta>]"
         VERSION_CORE="${SEMVER2%%[-+]*}"          # strip pre-release / metadata

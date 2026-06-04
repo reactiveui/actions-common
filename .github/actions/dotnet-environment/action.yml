@@ -36,6 +36,10 @@ inputs:
     description: 'MinVer auto-increment segment (major|minor|patch).'
     required: false
     default: 'minor'
+  minver-version-override:
+    description: 'Exact version to stamp, bypassing the MinVer git walk (e.g. "11.4.13" for an out-of-sequence / backport release). Empty = compute from tags as normal.'
+    required: false
+    default: ''
 
 outputs:
   nbgv-semver2:
@@ -102,3 +106,4 @@ runs:
         minimum-major-minor: ${{ inputs.minver-minimum-major-minor }}
         default-pre-release-identifiers: ${{ inputs.minver-default-pre-release-identifiers }}
         auto-increment: ${{ inputs.minver-auto-increment }}
+        version-override: ${{ inputs.minver-version-override }}

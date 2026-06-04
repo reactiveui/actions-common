@@ -70,7 +70,12 @@ on:
       bump:
         type: string
         default: ''
-        description: 'Release level (major|minor|patch) to cut a clean RTM version and push a tag before building. Empty = normal CI build (MinVer pre-release at HEAD, no tag).'
+        description: 'Release level (major|minor|patch) to cut a clean RTM version and push a tag before building. Empty = normal CI build (MinVer pre-release at HEAD, no tag). Mutually exclusive with versionOverride.'
+
+      versionOverride:
+        type: string
+        default: ''
+        description: 'Exact version to stamp (e.g. "11.4.13"), bypassing the bump-from-latest-tag math and the MinVer git walk. Use for an out-of-sequence / backport release whose number does not follow from the newest tag (e.g. shipping an 11.4.x patch while main is on 12.x). The release tag becomes <minverTagPrefix><versionOverride>. Mutually exclusive with bump.'
 
       buildOs:
         type: string
@@ -118,7 +123,7 @@ jobs:
     runs-on: ${{ inputs.buildOs }}
     outputs:
       semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
-      tag: ${{ steps.bump.outputs.tag }}
+      tag: ${{ steps.tagname.outputs.tag }}
       sourceSha: ${{ steps.sourcesha.outputs.sha }}
     steps:
       - name: Checkout
@@ -135,6 +140,16 @@ jobs:
         shell: bash
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # bump (compute next version from the latest tag) and versionOverride (stamp
+      # an exact version) are two different ways to pick the release number; setting
+      # both is ambiguous, so fail fast.
+      - name: Validate version inputs
+        if: inputs.bump != '' && inputs.versionOverride != ''
+        shell: bash
+        run: |
+          echo "::error::'bump' and 'versionOverride' are mutually exclusive — set exactly one."
+          exit 1
+
       # For a bump release: compute the next clean RTM version, push the vX.Y.Z
       # tag, and export MINVERVERSIONOVERRIDE so the MinVer step below stamps it.
       # Skipped (no-op) for normal CI builds where bump is empty.
@@ -142,13 +157,36 @@ jobs:
       # create the tag yet — the tag is pushed by create-release at the end, so a
       # failed build/sign/publish never leaves an orphan tag.
       - name: Compute version and tag
-        if: inputs.bump != ''
+        if: inputs.bump != '' && inputs.versionOverride == ''
         id: bump
         uses: reactiveui/actions-common/.github/actions/compute-version-and-tag@main
         with:
           bump: ${{ inputs.bump }}
           tag-prefix: ${{ inputs.minverTagPrefix }}
           push-tag: 'false'
+
+      # Resolve the tag the GitHub release will create at the end. The override
+      # path forms <prefix><versionOverride> and fails fast if it already exists
+      # (the bump path does its own existence check inside compute-version-and-tag).
+      - name: Resolve release tag
+        id: tagname
+        shell: bash
+        env:
+          BUMP_TAG: ${{ steps.bump.outputs.tag }}
+          VERSION_OVERRIDE: ${{ inputs.versionOverride }}
+          TAG_PREFIX: ${{ inputs.minverTagPrefix }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERSION_OVERRIDE" ]; then
+            TAG="${TAG_PREFIX}${VERSION_OVERRIDE}"
+            if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+              echo "::error::Tag ${TAG} already exists. Refusing to re-release an existing version."
+              exit 1
+            fi
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${BUMP_TAG}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Setup .NET Environment
         id: environment
@@ -162,6 +200,7 @@ jobs:
           minver-minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
           minver-auto-increment: ${{ inputs.minverAutoIncrement }}
           minver-default-pre-release-identifiers: ${{ inputs.minverDefaultPreReleaseIdentifiers }}
+          minver-version-override: ${{ inputs.versionOverride }}
 
       - name: Build (dotnet)
         if: inputs.useUNO == false
