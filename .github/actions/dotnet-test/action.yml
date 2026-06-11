@@ -131,7 +131,7 @@ runs:
 
     - name: Run tests with legacy Coverlet MSBuild coverage
       if: steps.detect-mode.outputs.mode == 'legacy'
-      uses: glennawatson/coverlet-msbuild@v2.1
+      uses: glennawatson/coverlet-msbuild@9a6e0593934168bec404ee30f395336d4fccc303 # v2.1
       with:
         project-files: '${{ inputs.src-folder }}/${{ inputs.tests-project-glob }}'
         no-build: true
