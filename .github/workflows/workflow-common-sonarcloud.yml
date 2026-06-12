@@ -2,8 +2,10 @@ name: Common SonarCloud analysis workflow
 
 # Standalone SonarCloud scan: checks out the repo, restores the .NET
 # environment, runs sonarscanner begin -> dotnet build -> dotnet test ->
-# sonarscanner end on a Linux runner. Call this from a project's own
-# workflow alongside (not inside) the regular CI build.
+# sonarscanner end. Runs on windows-latest by default (override via the
+# runsOn input) so projects with Windows/Apple target frameworks analyse
+# their platform-specific code. Call this from a project's own workflow
+# alongside (not inside) the regular CI build.
 
 permissions:
   contents: read
@@ -134,6 +136,11 @@ on:
         default: ''
         description: 'Optional global MTP test timeout (format [h|m|s], e.g. "5m"). Empty = no timeout.'
 
+      runsOn:
+        type: string
+        default: 'windows-latest'
+        description: 'Runner the SonarCloud scan executes on. Defaults to windows-latest so Windows/Apple-targeting projects can build and analyse their platform-specific code; override (e.g. "ubuntu-latest") for Linux-only projects.'
+
     secrets:
       SONAR_TOKEN:
         required: true
@@ -141,7 +148,7 @@ on:
 
 jobs:
   sonarcloud:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runsOn }}
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
       # Surface SONAR_TOKEN to every step in this job so the composite action
