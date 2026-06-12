@@ -89,6 +89,13 @@ runs:
       if: inputs.mode == 'begin'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        # On Windows runners this step executes under Git Bash (MSYS2), which
+        # rewrites arguments that look like Unix paths — turning the scanner's
+        # /k:, /o:, /d: and /v: switches into k:, o:, ... and breaking the
+        # invocation. Excluding every argument from path conversion passes them
+        # through verbatim; harmless on Linux/macOS where no conversion happens.
+        MSYS2_ARG_CONV_EXCL: '*'
       run: |
         VERSION_ARG=""
         if [ -n "${{ inputs.version }}" ]; then
@@ -134,4 +141,8 @@ runs:
       if: inputs.mode == 'end'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        # See the begin step: stop Git Bash (MSYS2) on Windows from rewriting the
+        # /d:sonar.token switch (and the // in any URL value) before the scanner sees it.
+        MSYS2_ARG_CONV_EXCL: '*'
       run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
