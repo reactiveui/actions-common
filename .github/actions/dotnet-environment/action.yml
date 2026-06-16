@@ -52,22 +52,17 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Configure .NET install directory and CLI environment
+    - name: Configure .NET CLI environment
       shell: bash
+      # Quiet/telemetry hygiene only. We deliberately do NOT relocate the SDK or
+      # cache workloads: GitHub caches are branch-scoped, so a multi-GB workload
+      # cache is duplicated per branch/PR and blows the 10 GB OSS free budget,
+      # evicting even the NuGet cache that does help. Workloads install fresh.
       run: |
-        # Install the SDK into an isolated, user-writable directory rather than
-        # the system location, so the workload cache below captures only the
-        # workloads we install (not the image's preinstalled SDK) and restores
-        # without permission issues. setup-dotnet points DOTNET_ROOT/PATH here.
-        # (We do not cache the SDK itself: it comes from Microsoft's CDN at
-        # similar bandwidth to the Actions cache, so caching it is ~a wash and
-        # only adds to the 10 GB per-repo cache budget.)
         {
-          echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/dotnet"
           echo "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"
           echo "DOTNET_NOLOGO=1"
           echo "DOTNET_CLI_TELEMETRY_OPTOUT=1"
-          echo "DOTNET_VERSIONS_HASH=$(printf '%s' '${{ inputs.dotnet-versions }}' | sha256sum | cut -c1-12)"
         } >> "$GITHUB_ENV"
 
     - name: Setup .NET SDK with NuGet package cache
@@ -96,28 +91,6 @@ runs:
         foreach ($proc in 'dotnet.exe', 'MSBuild.exe', 'VBCSCompiler.exe') {
           try { Add-MpPreference -ExclusionProcess $proc -ErrorAction Stop } catch { }
         }
-
-    - name: Cache .NET workload packs (Windows)
-      # Workload packs (android/ios/maccatalyst/macos/tvos/maui/wasm) are
-      # re-downloaded on every run otherwise — the biggest Windows setup cost.
-      # Scoped to Windows on purpose: it is the slow leg that matters (Linux's
-      # workload restore is light), and caching all three OSes (~2-3 GB each
-      # alongside the ~1.7 GB NuGet caches) would risk exceeding GitHub's 10 GB
-      # per-repo cache budget. The restore step still runs to reconcile drift,
-      # so a stale/partial cache is never worse than installing fresh.
-      if: inputs.install-workloads == 'true' && runner.os == 'Windows'
-      uses: actions/cache@v5
-      with:
-        path: |
-          ${{ env.DOTNET_ROOT }}/packs
-          ${{ env.DOTNET_ROOT }}/metadata
-          ${{ env.DOTNET_ROOT }}/sdk-manifests
-          ${{ env.DOTNET_ROOT }}/template-packs
-          ${{ env.DOTNET_ROOT }}/library-packs
-        key: ${{ runner.os }}-dotnet-workloads-${{ env.DOTNET_VERSIONS_HASH }}-${{ hashFiles('**/global.json') }}
-        restore-keys: |
-          ${{ runner.os }}-dotnet-workloads-${{ env.DOTNET_VERSIONS_HASH }}-
-          ${{ runner.os }}-dotnet-workloads-
 
     - name: Resolve NuGet HTTP v3 cache path (Windows)
       if: runner.os == 'Windows'
