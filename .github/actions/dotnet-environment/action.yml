@@ -63,11 +63,60 @@ runs:
           **/global.json
           **/nuget.config
 
+    - name: Configure Windows Defender exclusions
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # Real-time scanning of every compiled assembly and obj file is a large
+        # share of the Windows build/test penalty. Exclude the build trees and
+        # the dotnet/NuGet caches for this runner session (best-effort).
+        $paths = @($env:GITHUB_WORKSPACE, $env:DOTNET_ROOT, $env:RUNNER_TEMP, (Join-Path $env:USERPROFILE '.nuget')) | Where-Object { $_ }
+        foreach ($p in $paths) {
+          try { Add-MpPreference -ExclusionPath $p -ErrorAction Stop; Write-Host "Defender exclusion: $p" }
+          catch { Write-Host "Skipped Defender exclusion for $p ($($_.Exception.Message))" }
+        }
+        foreach ($proc in 'dotnet.exe', 'MSBuild.exe', 'VBCSCompiler.exe') {
+          try { Add-MpPreference -ExclusionProcess $proc -ErrorAction Stop } catch { }
+        }
+
+    - name: Compute workload cache key
+      if: inputs.install-workloads == 'true'
+      shell: bash
+      run: echo "DOTNET_VERSIONS_HASH=$(printf '%s' '${{ inputs.dotnet-versions }}' | sha256sum | cut -c1-12)" >> "$GITHUB_ENV"
+
+    - name: Cache .NET workload packs
+      # Workload packs (android/ios/maccatalyst/macos/tvos/maui/wasm) are
+      # re-downloaded on every run otherwise — the single biggest Windows
+      # setup cost. Cache them keyed on OS + SDK versions + global.json; a
+      # warm hit turns `dotnet workload restore` into a near no-op. The
+      # restore step still runs to reconcile any drift, so a stale/partial
+      # cache is never worse than today.
+      if: inputs.install-workloads == 'true'
+      uses: actions/cache@v5
+      with:
+        path: |
+          ${{ env.DOTNET_ROOT }}/packs
+          ${{ env.DOTNET_ROOT }}/metadata
+          ${{ env.DOTNET_ROOT }}/sdk-manifests
+          ${{ env.DOTNET_ROOT }}/template-packs
+          ${{ env.DOTNET_ROOT }}/library-packs
+        key: ${{ runner.os }}-dotnet-workloads-${{ env.DOTNET_VERSIONS_HASH }}-${{ hashFiles('**/global.json') }}
+        restore-keys: |
+          ${{ runner.os }}-dotnet-workloads-${{ env.DOTNET_VERSIONS_HASH }}-
+          ${{ runner.os }}-dotnet-workloads-
+
+    - name: Resolve NuGet HTTP v3 cache path (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      # actions/cache does not expand %LOCALAPPDATA%, so the previous literal
+      # path never matched and the Windows feed cache silently never restored.
+      run: echo "NUGET_V3_CACHE_PATH=$env:LOCALAPPDATA\NuGet\v3-cache" >> $env:GITHUB_ENV
+
     - name: Cache NuGet HTTP v3 feed responses (Windows)
       if: runner.os == 'Windows'
       uses: actions/cache@v5
       with:
-        path: '%LOCALAPPDATA%\NuGet\v3-cache'
+        path: ${{ env.NUGET_V3_CACHE_PATH }}
         key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
         restore-keys: |
           ${{ runner.os }}-nugetv3-
