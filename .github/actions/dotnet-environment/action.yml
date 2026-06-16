@@ -99,13 +99,12 @@ runs:
 
     - name: Cache .NET workload packs (Windows)
       # Workload packs (android/ios/maccatalyst/macos/tvos/maui/wasm) are
-      # re-downloaded on every run otherwise — the single biggest Windows setup
-      # cost. Windows-only on purpose: caching all three OSes (~2-3 GB each plus
-      # the NuGet caches) blew past GitHub's 10 GB per-repo budget and the
-      # entries kept getting evicted, so every run paid the multi-GB save for no
-      # restore hit. Windows alone fits the budget, and it is the slow leg that
-      # matters (Linux's workload restore is light). The restore step still runs
-      # to reconcile drift, so a stale/partial cache is never worse than today.
+      # re-downloaded on every run otherwise — the biggest Windows setup cost.
+      # Scoped to Windows on purpose: it is the slow leg that matters (Linux's
+      # workload restore is light), and caching all three OSes (~2-3 GB each
+      # alongside the ~1.7 GB NuGet caches) would risk exceeding GitHub's 10 GB
+      # per-repo cache budget. The restore step still runs to reconcile drift,
+      # so a stale/partial cache is never worse than installing fresh.
       if: inputs.install-workloads == 'true' && runner.os == 'Windows'
       uses: actions/cache@v5
       with:
