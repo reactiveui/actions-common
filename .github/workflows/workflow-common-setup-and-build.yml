@@ -23,13 +23,9 @@ on:
 
       productNamespacePrefix:
         type: string
-        required: true
-        description: 'Namespace prefix for coverage include/exclude filters'
-
-      useVisualStudioPreview:
-        type: boolean
-        default: false
-        description: 'Use VS preview on Windows (for UNO/mobile scenarios)'
+        required: false
+        default: ''
+        description: 'Deprecated/unused: coverage filtering is driven by testconfig.json under MTP. Retained so existing callers can keep passing it.'
 
       solutionFile:
         type: string
@@ -74,21 +70,6 @@ on:
         type: boolean
         default: false
         description: 'Enable UNO-specific steps on Windows (msbuild/pack flow)'
-
-      testsProjectGlob:
-        type: string
-        default: '**/*Tests*.csproj'
-        description: 'Glob for test csproj files, relative to srcFolder'
-
-      coverageFormats:
-        type: string
-        default: 'cobertura'
-        description: 'Coverage output format (cobertura, xml, coverage)'
-
-      testingMode:
-        type: string
-        default: 'auto'
-        description: 'Testing mode: auto (detect), mtp (Microsoft Testing Platform), legacy (Coverlet)'
 
       mergedCoverageArtifactName:
         type: string
@@ -177,10 +158,6 @@ jobs:
           configuration: ${{ inputs.configuration }}
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
-          testing-mode: ${{ inputs.testingMode }}
-          tests-project-glob: ${{ inputs.testsProjectGlob }}
-          coverage-formats: ${{ inputs.coverageFormats }}
-          product-namespace-prefix: ${{ inputs.productNamespacePrefix }}
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
           test-timeout: ${{ inputs.testTimeout }}
 
@@ -230,10 +207,6 @@ jobs:
           configuration: ${{ inputs.configuration }}
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
-          testing-mode: ${{ inputs.testingMode }}
-          tests-project-glob: ${{ inputs.testsProjectGlob }}
-          coverage-formats: ${{ inputs.coverageFormats }}
-          product-namespace-prefix: ${{ inputs.productNamespacePrefix }}
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
           test-timeout: ${{ inputs.testTimeout }}
 

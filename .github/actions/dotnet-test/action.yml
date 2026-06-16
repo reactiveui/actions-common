@@ -1,5 +1,5 @@
 name: .NET Test
-description: Testing with MTP/legacy auto-detection, coverage collection, and per-OS artifact upload
+description: Run tests on Microsoft Testing Platform (MTP) with native coverage and per-OS artifact upload
 
 inputs:
   configuration:
@@ -14,21 +14,6 @@ inputs:
     description: 'Solution file relative to src-folder'
     required: false
     default: ''
-  testing-mode:
-    description: 'Testing mode: auto (detect), mtp (Microsoft Testing Platform), legacy (Coverlet)'
-    required: false
-    default: 'auto'
-  tests-project-glob:
-    description: 'Glob for test csproj files, relative to src-folder'
-    required: false
-    default: '**/*Tests*.csproj'
-  coverage-formats:
-    description: 'Coverage output format (cobertura, xml, coverage)'
-    required: false
-    default: 'cobertura'
-  product-namespace-prefix:
-    description: 'Namespace prefix for coverage include/exclude filters'
-    required: true
   enable-detailed-test-logging:
     description: 'Enable MTP diagnostic logging for hang/crash debugging: writes log_*.diag (Trace level, synchronous), turns on framework log-level Trace, and switches console output to Detailed (real-time per-test).'
     required: false
@@ -41,47 +26,18 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Detect testing platform (MTP vs legacy Coverlet)
-      id: detect-mode
-      shell: bash
-      working-directory: ${{ inputs.src-folder }}
-      run: |
-        MODE="${{ inputs.testing-mode }}"
-
-        if [ "$MODE" == "auto" ]; then
-          echo "Auto-detecting testing platform in ${{ inputs.src-folder }}..."
-
-          if grep -r "Microsoft.Testing.Extensions.CodeCoverage" . --include="*.props" --include="*.targets" --include="*.csproj" > /dev/null 2>&1; then
-            echo "MTP Package detected."
-
-            if [ -f "testconfig.json" ]; then
-              MODE="mtp"
-              echo "Clean Break Mode: Found testconfig.json in ${{ inputs.src-folder }}"
-            else
-              echo "ERROR: MTP detected but 'testconfig.json' is missing in ${{ inputs.src-folder }}!"
-              echo ""
-              echo "Microsoft Best Practices for MTP require a 'testconfig.json' file to manage coverage and execution."
-              echo "This native JSON configuration eliminates CLI switch errors (MSB1001) and ensures local/CI parity."
-              echo ""
-              echo "Create ${{ inputs.src-folder }}/testconfig.json with coverage settings:"
-              echo "https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
-              exit 1
-            fi
-          else
-            MODE="legacy"
-            echo "No MTP indicators found - falling back to legacy Coverlet"
-          fi
-        fi
-
-        echo "mode=$MODE" >> $GITHUB_OUTPUT
-        echo "Testing mode: $MODE"
-
     - name: Resolve solution file for MTP test runner
-      if: steps.detect-mode.outputs.mode == 'mtp'
       id: resolve-solution
       shell: bash
       working-directory: ${{ inputs.src-folder }}
       run: |
+        # MTP requires a testconfig.json alongside the solution to manage
+        # coverage and execution. Fail with a clear message if it is missing.
+        if [ ! -f "testconfig.json" ]; then
+          echo "::error::MTP requires '${{ inputs.src-folder }}/testconfig.json' (manages coverage and execution). See https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
+          exit 1
+        fi
+
         if [ -n "${{ inputs.solution-file }}" ]; then
           echo "solution-arg=--solution ${{ inputs.solution-file }}" >> $GITHUB_OUTPUT
         else
@@ -94,7 +50,6 @@ runs:
         fi
 
     - name: Expose GitHub Actions runtime for TUnit HTML report upload
-      if: steps.detect-mode.outputs.mode == 'mtp'
       uses: actions/github-script@v9
       with:
         script: |
@@ -102,7 +57,6 @@ runs:
           core.exportVariable('ACTIONS_RESULTS_URL', process.env['ACTIONS_RESULTS_URL']);
 
     - name: Run tests with Microsoft Testing Platform and native coverage
-      if: steps.detect-mode.outputs.mode == 'mtp'
       shell: bash
       working-directory: ${{ inputs.src-folder }}
       run: |
@@ -129,17 +83,6 @@ runs:
           --coverage-output-format cobertura \
           --results-directory ./TestResults
 
-    - name: Run tests with legacy Coverlet MSBuild coverage
-      if: steps.detect-mode.outputs.mode == 'legacy'
-      uses: glennawatson/coverlet-msbuild@9a6e0593934168bec404ee30f395336d4fccc303 # v2.1
-      with:
-        project-files: '${{ inputs.src-folder }}/${{ inputs.tests-project-glob }}'
-        no-build: true
-        exclude-filter: '[${{ inputs.product-namespace-prefix }}.*.Tests.*]*,[${{ inputs.product-namespace-prefix }}.Tests]*,[${{ inputs.product-namespace-prefix }}.TestRunner.*]*'
-        include-filter: '[${{ inputs.product-namespace-prefix }}*]*'
-        output-format: '"${{ inputs.coverage-formats }}"'
-        configuration: ${{ inputs.configuration }}
-
     - name: Upload per-OS coverage reports as build artifacts
       uses: actions/upload-artifact@v7
       with:
@@ -155,7 +98,7 @@ runs:
     # debuggable. if: always() ensures the upload runs even if the test step
     # failed or was killed.
     - name: Upload MTP diagnostic logs
-      if: always() && steps.detect-mode.outputs.mode == 'mtp' && inputs.enable-detailed-test-logging == 'true'
+      if: always() && inputs.enable-detailed-test-logging == 'true'
       uses: actions/upload-artifact@v7
       with:
         name: mtp-diagnostic-logs-${{ runner.os }}
