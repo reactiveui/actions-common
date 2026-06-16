@@ -55,10 +55,13 @@ runs:
     - name: Configure .NET install directory and CLI environment
       shell: bash
       run: |
-        # Install the SDK into a user-writable, cacheable directory rather than
-        # the system location, so the SDK install itself can be cached across
-        # runs — setup-dotnet's built-in cache only covers NuGet packages, not
-        # the SDK. setup-dotnet points DOTNET_ROOT/PATH at this directory.
+        # Install the SDK into an isolated, user-writable directory rather than
+        # the system location, so the workload cache below captures only the
+        # workloads we install (not the image's preinstalled SDK) and restores
+        # without permission issues. setup-dotnet points DOTNET_ROOT/PATH here.
+        # (We do not cache the SDK itself: it comes from Microsoft's CDN at
+        # similar bandwidth to the Actions cache, so caching it is ~a wash and
+        # only adds to the 10 GB per-repo cache budget.)
         {
           echo "DOTNET_INSTALL_DIR=${{ runner.temp }}/dotnet"
           echo "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"
@@ -66,23 +69,6 @@ runs:
           echo "DOTNET_CLI_TELEMETRY_OPTOUT=1"
           echo "DOTNET_VERSIONS_HASH=$(printf '%s' '${{ inputs.dotnet-versions }}' | sha256sum | cut -c1-12)"
         } >> "$GITHUB_ENV"
-
-    - name: Cache .NET SDK install
-      # Cache the extracted SDKs (excluding the workload trees, which have their
-      # own cache below) keyed on OS + SDK versions. A warm hit lets setup-dotnet
-      # skip the multi-SDK download/extract — the bulk of the Windows setup cost.
-      uses: actions/cache@v5
-      with:
-        path: |
-          ${{ runner.temp }}/dotnet
-          !${{ runner.temp }}/dotnet/packs
-          !${{ runner.temp }}/dotnet/metadata
-          !${{ runner.temp }}/dotnet/sdk-manifests
-          !${{ runner.temp }}/dotnet/template-packs
-          !${{ runner.temp }}/dotnet/library-packs
-        key: ${{ runner.os }}-dotnet-sdk-${{ env.DOTNET_VERSIONS_HASH }}
-        restore-keys: |
-          ${{ runner.os }}-dotnet-sdk-
 
     - name: Setup .NET SDK with NuGet package cache
       uses: actions/setup-dotnet@v5
