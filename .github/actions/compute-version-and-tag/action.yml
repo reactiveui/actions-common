@@ -1,10 +1,17 @@
 name: Compute version and tag
 description: |
-  Cut a clean RTM version for a tag-first MinVer repo. Given a bump level
+  Cut a clean version for a tag-first MinVer repo. Given a bump level
   (major|minor|patch), find the latest RTM tag (<prefix>X.Y.Z, ignoring
   pre-release tags), increment the requested segment, create and push the new
   tag on HEAD, and export MINVERVERSIONOVERRIDE so the subsequent build/pack
   stamps that exact version.
+
+  Pre-release channel (pre-release-id, e.g. beta): the bumped core is suffixed
+  with -<id>.<N>, where <N> auto-increments from the highest existing
+  <prefix><core>-<id>.<N> tag (starting at 1). So bump=major + pre-release-id=beta
+  off v5.4.0 yields v6.0.0-beta.1, then v6.0.0-beta.2 on the next run, and a later
+  bump=major with no pre-release-id finalises the same core as v6.0.0. Dotted
+  SemVer 2.0 form (-beta.1, not -beta-1) so NuGet orders pre-releases correctly.
 
   Brand-new repo with no RTM tag yet: the baseline is seeded at 0.0.0, so the
   first release comes straight from the bump (patch -> 0.0.1, minor -> 0.1.0,
@@ -30,14 +37,21 @@ inputs:
     description: 'true = create and push the tag now. false = only compute the version + export MINVERVERSIONOVERRIDE and emit the tag name, leaving tag creation to a later step (e.g. GitHub release creation), so a failed build/sign/publish does not leave an orphan tag.'
     required: false
     default: 'true'
+  pre-release-id:
+    description: 'Pre-release channel identifier (e.g. alpha, beta, rc). Empty = stable RTM release. When set, the computed version is <core>-<id>.<N> where <core> is the bumped stable version and <N> auto-increments from the highest existing <prefix><core>-<id>.<N> tag (starting at 1). Must be a SemVer 2.0 alphanumeric/hyphen identifier (no dots).'
+    required: false
+    default: ''
 
 outputs:
   version:
-    description: 'Computed RTM version (e.g. 2.4.0). Empty when bump is empty.'
+    description: 'Computed version (e.g. 2.4.0, or 6.0.0-beta.1 for a pre-release). Empty when bump is empty.'
     value: ${{ steps.compute.outputs.version }}
   tag:
-    description: 'Pushed tag, prefix included (e.g. v2.4.0). Empty when bump is empty.'
+    description: 'Pushed tag, prefix included (e.g. v2.4.0 or v6.0.0-beta.1). Empty when bump is empty.'
     value: ${{ steps.compute.outputs.tag }}
+  prerelease:
+    description: 'true when a pre-release version was computed (pre-release-id set), false for a stable RTM version. Empty when bump is empty.'
+    value: ${{ steps.compute.outputs.prerelease }}
 
 runs:
   using: composite
@@ -49,6 +63,7 @@ runs:
         BUMP: ${{ inputs.bump }}
         TAG_PREFIX: ${{ inputs.tag-prefix }}
         PUSH_TAG: ${{ inputs.push-tag }}
+        PRE_RELEASE_ID: ${{ inputs.pre-release-id }}
       run: |
         set -euo pipefail
 
@@ -88,13 +103,45 @@ runs:
         IFS=. read -r MAJ MIN PAT <<< "$LAST"
 
         case "$BUMP" in
-          major) VERSION="$((MAJ + 1)).0.0" ;;
-          minor) VERSION="${MAJ}.$((MIN + 1)).0" ;;
-          patch) VERSION="${MAJ}.${MIN}.$((PAT + 1))" ;;
+          major) CORE="$((MAJ + 1)).0.0" ;;
+          minor) CORE="${MAJ}.$((MIN + 1)).0" ;;
+          patch) CORE="${MAJ}.${MIN}.$((PAT + 1))" ;;
         esac
 
+        if [ -n "$PRE_RELEASE_ID" ]; then
+          # SemVer 2.0 pre-release identifiers are alphanumerics and hyphens only.
+          # We forbid a dot in the id so "<core>-<id>.<N>" has exactly one dotted
+          # numeric counter to parse (e.g. beta.7, not beta.1.7).
+          case "$PRE_RELEASE_ID" in
+            *[!A-Za-z0-9-]*|'')
+              echo "::error::pre-release-id '${PRE_RELEASE_ID}' must be a SemVer 2.0 alphanumeric/hyphen identifier (no dots)."
+              exit 1 ;;
+          esac
+
+          # Auto-increment the channel counter: scan existing
+          # <prefix><core>-<id>.<N> tags and take max(N)+1, starting at 1 when
+          # this is the first pre-release of this core+channel. The counter is
+          # per (core, channel), so switching beta -> rc restarts at rc.1.
+          MAXN=0
+          while IFS= read -r t; do
+            [ -z "$t" ] && continue
+            n="${t##*.}"               # trailing segment after the last dot
+            case "$n" in
+              ''|*[!0-9]*) continue ;; # ignore tags without a numeric counter
+            esac
+            if [ "$n" -gt "$MAXN" ]; then MAXN="$n"; fi
+          done < <(git tag --list "${TAG_PREFIX}${CORE}-${PRE_RELEASE_ID}.[0-9]*")
+
+          NEXT=$((MAXN + 1))
+          VERSION="${CORE}-${PRE_RELEASE_ID}.${NEXT}"
+          PRERELEASE=true
+        else
+          VERSION="${CORE}"
+          PRERELEASE=false
+        fi
+
         TAG="${TAG_PREFIX}${VERSION}"
-        echo "Latest RTM tag: ${TAG_PREFIX}${LAST} -> next (${BUMP}): ${TAG}"
+        echo "Latest RTM tag: ${TAG_PREFIX}${LAST} -> next (${BUMP}${PRE_RELEASE_ID:+, ${PRE_RELEASE_ID}}): ${TAG}"
 
         if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
           echo "::error::Tag ${TAG} already exists. Refusing to re-release an existing version."
@@ -118,4 +165,5 @@ runs:
         {
           echo "version=${VERSION}"
           echo "tag=${TAG}"
+          echo "prerelease=${PRERELEASE}"
         } >> "$GITHUB_OUTPUT"

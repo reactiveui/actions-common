@@ -26,6 +26,11 @@ on:
         default: ''
         description: 'Commit SHA (or branch) the new tag is created from. Empty = the commit that triggered the run (github.sha). Set to the built source SHA when re-releasing historical source so the tag points at that commit.'
 
+      prerelease:
+        type: boolean
+        default: false
+        description: 'Mark the GitHub release as a pre-release (adds --prerelease). Pass workflow-common-release''s prerelease output so beta/rc cuts are flagged as pre-releases and not surfaced as "Latest".'
+
 jobs:
   # ============================
   # CREATE GITHUB RELEASE (Linux)
@@ -54,6 +59,26 @@ jobs:
       # front (so a failed build/sign/publish leaves no orphan tag). --target pins
       # the new tag to the exact commit this run built.
       - name: Create GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ inputs.tag != '' && inputs.tag || inputs.version }}" --repo "${{ github.repository }}" --target "${{ inputs.target != '' && inputs.target || github.sha }}" --title "${{ inputs.version }}" --notes-file release-notes.md ./signed/*.nupkg
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag != '' && inputs.tag || inputs.version }}
+          TARGET: ${{ inputs.target != '' && inputs.target || github.sha }}
+          TITLE: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # Flag beta/rc cuts as pre-releases so GitHub keeps the latest stable
+          # tagged "Latest" rather than promoting a pre-release over it.
+          PRERELEASE_FLAG=()
+          if [ "$PRERELEASE" = "true" ]; then
+            PRERELEASE_FLAG=(--prerelease)
+          fi
+          gh release create "$TAG" \
+            --repo "$REPO" \
+            --target "$TARGET" \
+            --title "$TITLE" \
+            --notes-file release-notes.md \
+            "${PRERELEASE_FLAG[@]}" \
+            ./signed/*.nupkg

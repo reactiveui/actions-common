@@ -73,6 +73,11 @@ on:
         default: ''
         description: 'Release level (major|minor|patch) to cut a clean RTM version and push a tag before building. Empty = normal CI build (MinVer pre-release at HEAD, no tag). Mutually exclusive with versionOverride.'
 
+      preRelease:
+        type: string
+        default: ''
+        description: 'Pre-release channel identifier (e.g. alpha, beta, rc) to cut a pre-release instead of a stable version. Requires bump (the channel rides on the bumped core); the version becomes <bumped-core>-<channel>.<N> with <N> auto-incrementing from existing <prefix><core>-<channel>.<N> tags. Empty = stable RTM release. Mutually exclusive with versionOverride.'
+
       versionOverride:
         type: string
         default: ''
@@ -93,8 +98,11 @@ on:
         description: 'MinVer SemVer2 version string.'
         value: ${{ jobs.build.outputs.semver2 }}
       tag:
-        description: 'Tag pushed for a bump release (e.g. v2.4.0). Empty for CI builds.'
+        description: 'Tag pushed for a bump release (e.g. v2.4.0 or v6.0.0-beta.1). Empty for CI builds.'
         value: ${{ jobs.build.outputs.tag }}
+      prerelease:
+        description: 'true when the released version is a pre-release (preRelease channel set, or a hyphenated versionOverride). Pass to workflow-common-create-release so the GitHub release is flagged pre-release.'
+        value: ${{ jobs.build.outputs.prerelease }}
       sourceSha:
         description: 'Resolved commit SHA that was actually built (honors the ref input). Pass to workflow-common-create-release as target so the new release tag points at the built commit.'
         value: ${{ jobs.build.outputs.sourceSha }}
@@ -125,6 +133,7 @@ jobs:
     outputs:
       semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
       tag: ${{ steps.tagname.outputs.tag }}
+      prerelease: ${{ steps.tagname.outputs.prerelease }}
       sourceSha: ${{ steps.sourcesha.outputs.sha }}
     steps:
       - name: Checkout
@@ -143,13 +152,28 @@ jobs:
 
       # bump (compute next version from the latest tag) and versionOverride (stamp
       # an exact version) are two different ways to pick the release number; setting
-      # both is ambiguous, so fail fast.
+      # both is ambiguous, so fail fast. A preRelease channel rides on the bumped
+      # core, so it needs bump and is likewise incompatible with versionOverride.
       - name: Validate version inputs
-        if: inputs.bump != '' && inputs.versionOverride != ''
         shell: bash
+        env:
+          BUMP: ${{ inputs.bump }}
+          PRE_RELEASE: ${{ inputs.preRelease }}
+          VERSION_OVERRIDE: ${{ inputs.versionOverride }}
         run: |
-          echo "::error::'bump' and 'versionOverride' are mutually exclusive — set exactly one."
-          exit 1
+          set -euo pipefail
+          if [ -n "$BUMP" ] && [ -n "$VERSION_OVERRIDE" ]; then
+            echo "::error::'bump' and 'versionOverride' are mutually exclusive — set exactly one."
+            exit 1
+          fi
+          if [ -n "$PRE_RELEASE" ] && [ -n "$VERSION_OVERRIDE" ]; then
+            echo "::error::'preRelease' cannot be combined with 'versionOverride' (the override is stamped verbatim — put any pre-release suffix in the override itself)."
+            exit 1
+          fi
+          if [ -n "$PRE_RELEASE" ] && [ -z "$BUMP" ]; then
+            echo "::error::'preRelease' requires 'bump' (major|minor|patch) so the channel has a core version to attach to."
+            exit 1
+          fi
 
       # For a bump release: compute the next clean RTM version, push the vX.Y.Z
       # tag, and export MINVERVERSIONOVERRIDE so the MinVer step below stamps it.
@@ -164,6 +188,7 @@ jobs:
         with:
           bump: ${{ inputs.bump }}
           tag-prefix: ${{ inputs.minverTagPrefix }}
+          pre-release-id: ${{ inputs.preRelease }}
           push-tag: 'false'
 
       # Resolve the tag the GitHub release will create at the end. The override
@@ -174,6 +199,7 @@ jobs:
         shell: bash
         env:
           BUMP_TAG: ${{ steps.bump.outputs.tag }}
+          BUMP_PRERELEASE: ${{ steps.bump.outputs.prerelease }}
           VERSION_OVERRIDE: ${{ inputs.versionOverride }}
           TAG_PREFIX: ${{ inputs.minverTagPrefix }}
         run: |
@@ -184,9 +210,17 @@ jobs:
               echo "::error::Tag ${TAG} already exists. Refusing to re-release an existing version."
               exit 1
             fi
-            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            # A SemVer 2.0 pre-release is anything carrying a hyphenated suffix.
+            case "$VERSION_OVERRIDE" in *-*) PRERELEASE=true ;; *) PRERELEASE=false ;; esac
+            {
+              echo "tag=${TAG}"
+              echo "prerelease=${PRERELEASE}"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${BUMP_TAG}" >> "$GITHUB_OUTPUT"
+            {
+              echo "tag=${BUMP_TAG}"
+              echo "prerelease=${BUMP_PRERELEASE:-false}"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup .NET Environment
