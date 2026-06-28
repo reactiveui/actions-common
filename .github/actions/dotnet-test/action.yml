@@ -73,6 +73,9 @@ runs:
           TIMEOUT_ARGS="--timeout ${{ inputs.test-timeout }}"
         fi
 
+        # No --results-directory: MTP's per-app default keeps each TFM's diag
+        # log in its own dir, avoiding a flaky log_<ts>.diag filename collision
+        # across parallel test hosts. Globs below still collect coverage/.diag.
         # shellcheck disable=SC2086
         dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
           --no-build \
@@ -80,8 +83,7 @@ runs:
           $DIAG_ARGS \
           $TIMEOUT_ARGS \
           --coverage \
-          --coverage-output-format cobertura \
-          --results-directory ./TestResults
+          --coverage-output-format cobertura
 
     - name: Upload per-OS coverage reports as build artifacts
       uses: actions/upload-artifact@v7
