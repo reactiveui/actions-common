@@ -140,6 +140,12 @@ jobs:
     # hard-fail. A job skipped via this `if:` reports success to branch
     # protection, so external-contributor PRs stay green. Analysis still runs on
     # push to main and on same-repo (maintainer) PRs, where the token exists.
+    #
+    # Fork PRs are not left unanalysed: the companion
+    # workflow-common-sonarcloud-fork.yml picks them up via a `workflow_run`
+    # trigger and scans them from the trusted base-repo context (where the token
+    # is available). The two workflows are deliberately mutually exclusive on
+    # the fork condition so a PR is never scanned twice.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
