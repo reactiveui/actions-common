@@ -135,6 +135,14 @@ on:
 
 jobs:
   sonarcloud:
+    # Skip pull requests opened from forks: SONAR_TOKEN is a repo secret and is
+    # never exposed to fork PR runs, so the scan cannot authenticate and would
+    # hard-fail. A job skipped via this `if:` reports success to branch
+    # protection, so external-contributor PRs stay green. Analysis still runs on
+    # push to main and on same-repo (maintainer) PRs, where the token exists.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ inputs.runsOn }}
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
