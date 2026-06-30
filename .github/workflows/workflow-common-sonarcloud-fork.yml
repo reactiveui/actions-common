@@ -1,0 +1,275 @@
+name: Common SonarCloud fork-PR analysis workflow
+
+# SonarCloud analysis for pull requests opened from forks.
+#
+# Fork PRs never receive repository secrets, so the standard
+# workflow-common-sonarcloud.yml self-skips them (no SONAR_TOKEN). This workflow
+# closes that gap using the secure-by-design `workflow_run` pattern: the caller
+# is triggered by `workflow_run` once the untrusted PR build has finished, so it
+# executes in the BASE repository's trusted context and therefore has access to
+# SONAR_TOKEN. It re-checks-out the fork's head commit and runs a full
+# begin -> build -> test -> end scan, decorating the originating PR.
+#
+# SECURITY: this job builds untrusted fork code on a runner that holds
+# SONAR_TOKEN, so a malicious fork could attempt to read it. That exposure is
+# inherent to the SonarScanner-for-.NET model (the scanner must wrap the real
+# build) and is accepted because SONAR_TOKEN is scoped to a single project's
+# analysis. Mitigations applied here: we only run after the PR build concluded,
+# we check out the immutable head SHA, and the fork-controlled PR branch/base
+# names are sanitised before they reach the scanner command line. Do NOT add
+# steps that grant this job higher-privilege secrets.
+
+permissions:
+  contents: read
+  actions: read   # download the PR-metadata artifact from the triggering run
+
+on:
+  workflow_call:
+    inputs:
+      configuration:
+        type: string
+        default: 'Release'
+        description: 'Build configuration'
+
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+          11.0.x
+        description: 'Newline-separated list of .NET SDKs'
+
+      solutionFile:
+        type: string
+        description: 'Solution file relative to srcFolder'
+
+      srcFolder:
+        type: string
+        default: 'src'
+        description: 'Folder containing the solution'
+
+      performTests:
+        type: boolean
+        default: true
+        description: 'Run tests + collect coverage inside the Sonar scan'
+
+      minverMinimumMajorMinor:
+        type: string
+        default: ''
+        description: 'floor major.minor when no tag is reachable (e.g. "1.0").'
+
+      minverTagPrefix:
+        type: string
+        default: 'v'
+        description: 'git tag prefix MinVer expects.'
+
+      minverAutoIncrement:
+        type: string
+        default: 'minor'
+        description: 'auto-increment segment (major|minor|patch).'
+
+      minverDefaultPreReleaseIdentifiers:
+        type: string
+        default: 'alpha.0'
+        description: 'pre-release identifier(s) for height-only builds.'
+
+      sonarProjectKey:
+        type: string
+        required: true
+        description: 'SonarCloud project key (e.g. reactiveui_Foo).'
+
+      sonarOrganization:
+        type: string
+        required: true
+        description: 'SonarCloud organization slug (e.g. reactiveui).'
+
+      sonarHostUrl:
+        type: string
+        default: 'https://sonarcloud.io'
+        description: 'SonarCloud / SonarQube host URL.'
+
+      sonarExtraBeginArgs:
+        type: string
+        default: ''
+        description: 'Extra raw arguments appended to the dotnet-sonarscanner begin invocation (trusted; set by the calling repo, never derived from PR input).'
+
+      sonarExclusions:
+        type: string
+        default: ''
+        description: 'Comma-separated globs for sonar.exclusions. Empty = flag omitted.'
+
+      sonarCoverageExclusions:
+        type: string
+        default: '**/*Tests/**,**/*Tests.cs,**/Generated/**'
+        description: 'Comma-separated globs for sonar.coverage.exclusions. Empty = flag omitted.'
+
+      sonarCpdExclusions:
+        type: string
+        default: ''
+        description: 'Comma-separated globs for sonar.cpd.exclusions. Empty = flag omitted.'
+
+      sonarTestExclusions:
+        type: string
+        default: ''
+        description: 'Comma-separated globs for sonar.test.exclusions. Empty = flag omitted.'
+
+      installWorkloads:
+        type: boolean
+        default: false
+        description: 'If true, run workload restore'
+
+      enableDetailedTestLogging:
+        type: boolean
+        default: true
+        description: 'Enable MTP diagnostic logging.'
+
+      testTimeout:
+        type: string
+        default: ''
+        description: 'Optional global MTP test timeout (format [h|m|s], e.g. "5m"). Empty = no timeout.'
+
+      runsOn:
+        type: string
+        default: 'windows-latest'
+        description: 'Runner the scan executes on. Defaults to windows-latest to match the standard SonarCloud workflow.'
+
+      prMetadataArtifact:
+        type: string
+        default: 'pr-number'
+        description: 'Name of the artifact (uploaded by the untrusted PR build) holding the PR number/base. Must contain files named "number" and "base".'
+
+    secrets:
+      SONAR_TOKEN:
+        required: true
+        description: 'SonarCloud token.'
+
+jobs:
+  sonarcloud-fork:
+    # Defensive guard: only analyse a fork PR whose build run concluded. The
+    # caller is expected to gate this too; this keeps the reusable workflow safe
+    # if called directly. Same-repo PRs are handled by the standard workflow, so
+    # they are excluded here to avoid double analysis.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ${{ inputs.runsOn }}
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+      # Surface SONAR_TOKEN to the composite sonarcloud action (which reads env,
+      # not inputs). See SECURITY note in the file header: this is in scope while
+      # the fork build runs, which is the accepted trade-off of this pattern.
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - name: Validate SonarCloud token
+        run: |
+          if [ -z "${SONAR_TOKEN:-}" ]; then
+            echo "::error::SONAR_TOKEN secret is required"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Download PR metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.prMetadataArtifact }}
+          path: ${{ runner.temp }}/pr-meta
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Resolve PR analysis arguments
+        id: prargs
+        shell: bash
+        env:
+          # head_branch is attacker-controlled (fork PR); read it via env, never
+          # interpolate it straight into a run script.
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          meta="${RUNNER_TEMP}/pr-meta"
+          number=$(cat "${meta}/number")
+          base=$(cat "${meta}/base")
+
+          # The PR number becomes the Sonar PR key — it must be purely numeric.
+          case "$number" in
+            ''|*[!0-9]*) echo "::error::PR number artifact is not numeric: '$number'"; exit 1 ;;
+          esac
+
+          # Branch/base names are spliced into the UNQUOTED sonarscanner begin
+          # command line by the composite action, so strip anything outside a
+          # safe git-ref charset to prevent shell/argument injection from a
+          # hostile fork branch name (e.g. "foo$(curl evil)").
+          sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9._/-'; }
+          branch_safe=$(sanitize "$HEAD_BRANCH")
+          base_safe=$(sanitize "$base")
+
+          echo "args=/d:sonar.pullrequest.key=${number} /d:sonar.pullrequest.branch=${branch_safe} /d:sonar.pullrequest.base=${base_safe}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout fork PR head
+        uses: actions/checkout@v6
+        with:
+          # Build the exact commit the build ran on. head_sha is immutable, so
+          # this cannot be raced to a different commit after the build passed.
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+
+      - name: Setup .NET Environment
+        id: environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+          minver-tag-prefix: ${{ inputs.minverTagPrefix }}
+          minver-minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
+          minver-auto-increment: ${{ inputs.minverAutoIncrement }}
+          minver-default-pre-release-identifiers: ${{ inputs.minverDefaultPreReleaseIdentifiers }}
+
+      - name: SonarCloud begin
+        uses: reactiveui/actions-common/.github/actions/sonarcloud@main
+        with:
+          mode: begin
+          project-key: ${{ inputs.sonarProjectKey }}
+          organization: ${{ inputs.sonarOrganization }}
+          host-url: ${{ inputs.sonarHostUrl }}
+          version: ${{ steps.environment.outputs.version-semver2 }}
+          # PR-decoration flags (sanitised above) first, then any trusted
+          # caller-supplied extras.
+          extra-begin-args: ${{ steps.prargs.outputs.args }} ${{ inputs.sonarExtraBeginArgs }}
+          exclusions: ${{ inputs.sonarExclusions }}
+          coverage-exclusions: ${{ inputs.sonarCoverageExclusions }}
+          cpd-exclusions: ${{ inputs.sonarCpdExclusions }}
+          test-exclusions: ${{ inputs.sonarTestExclusions }}
+          working-directory: ${{ inputs.srcFolder }}
+
+      - name: Build
+        uses: reactiveui/actions-common/.github/actions/dotnet-build@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          create-packages: 'false'
+
+      - name: Test
+        if: inputs.performTests == true
+        uses: reactiveui/actions-common/.github/actions/dotnet-test@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
+          test-timeout: ${{ inputs.testTimeout }}
+
+      - name: SonarCloud end
+        # Always end the scan if begin succeeded, so a failed build/test still
+        # uploads partial analysis instead of leaving the scan dangling.
+        if: always()
+        uses: reactiveui/actions-common/.github/actions/sonarcloud@main
+        with:
+          mode: end
+          project-key: ${{ inputs.sonarProjectKey }}
+          working-directory: ${{ inputs.srcFolder }}
