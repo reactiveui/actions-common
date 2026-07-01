@@ -101,7 +101,7 @@ runs:
 
     - name: Cache NuGet HTTP v3 feed responses (Windows)
       if: runner.os == 'Windows'
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ${{ env.NUGET_V3_CACHE_PATH }}
         key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
@@ -110,7 +110,7 @@ runs:
 
     - name: Cache NuGet HTTP v3 feed responses (Unix)
       if: runner.os != 'Windows'
-      uses: actions/cache@v5
+      uses: actions/cache@v6
       with:
         path: ~/.local/share/NuGet/v3-cache
         key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}

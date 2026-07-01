@@ -209,7 +209,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout PR head
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Check out the PR head through the BASE repo's refs/pull/<n>/head ref
           # rather than the fork repository directly. This still builds the
