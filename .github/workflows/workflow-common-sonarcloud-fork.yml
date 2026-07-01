@@ -203,15 +203,23 @@ jobs:
           branch_safe=$(sanitize "$HEAD_BRANCH")
           base_safe=$(sanitize "$base")
 
-          echo "args=/d:sonar.pullrequest.key=${number} /d:sonar.pullrequest.branch=${branch_safe} /d:sonar.pullrequest.base=${base_safe}" >> "$GITHUB_OUTPUT"
+          {
+            echo "number=${number}"
+            echo "args=/d:sonar.pullrequest.key=${number} /d:sonar.pullrequest.branch=${branch_safe} /d:sonar.pullrequest.base=${base_safe}"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Checkout fork PR head
+      - name: Checkout PR head
         uses: actions/checkout@v6
         with:
-          # Build the exact commit the build ran on. head_sha is immutable, so
-          # this cannot be raced to a different commit after the build passed.
-          repository: ${{ github.event.workflow_run.head_repository.full_name }}
-          ref: ${{ github.event.workflow_run.head_sha }}
+          # Check out the PR head through the BASE repo's refs/pull/<n>/head ref
+          # rather than the fork repository directly. This still builds the
+          # fork's exact head commit, but keeps the upstream release tags
+          # reachable so MinVer (and anything version-sensitive downstream, e.g.
+          # source-generator snapshot tests) computes the SAME version as a
+          # normal build. Checking out the fork loses those tags and yields a
+          # wrong version. The PR number is validated numeric above, so it is
+          # safe to interpolate into the ref.
+          ref: refs/pull/${{ steps.prargs.outputs.number }}/head
           fetch-depth: 0
           lfs: true
           persist-credentials: false
