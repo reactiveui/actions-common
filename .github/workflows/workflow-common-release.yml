@@ -137,7 +137,7 @@ jobs:
       sourceSha: ${{ steps.sourcesha.outputs.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Empty ref => checkout's default (the triggering ref). A branch/tag/SHA
           # here re-releases historical source with the current signing pipeline.

@@ -54,7 +54,7 @@ jobs:
       semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           lfs: true
