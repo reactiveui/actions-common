@@ -1,0 +1,114 @@
+name: Common Native AOT smoke workflow
+
+permissions:
+  contents: read
+
+concurrency:
+  group: common-aot-smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+on:
+  workflow_call:
+    inputs:
+      projectFile:
+        type: string
+        required: true
+        description: 'Native AOT smoke-test project (.csproj) to publish, relative to the repo root. It should set PublishAot=true and exit non-zero when the smoke test fails.'
+
+      executableName:
+        type: string
+        default: ''
+        description: 'Base name of the produced native executable (no extension). Empty = derive from the project file name.'
+
+      configuration:
+        type: string
+        default: 'Release'
+        description: 'Build configuration to publish.'
+
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+          11.0.x
+        description: 'Newline-separated list of .NET SDKs to install (must cover every target framework the project and its references build for).'
+
+      srcFolder:
+        type: string
+        default: 'src'
+        description: 'Folder containing the solution (used only when installWorkloads is true).'
+
+      installWorkloads:
+        type: boolean
+        default: false
+        description: 'If true, run workload restore during environment setup.'
+
+jobs:
+  aot-smoke:
+    name: aot-smoke (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          install-workloads: ${{ inputs.installWorkloads }}
+
+      - name: Install native AOT prerequisites (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        # ILC links the native image with clang and needs zlib headers on Linux.
+        # The hosted image usually ships these; install defensively so the gate
+        # does not rot if the image drops them.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - name: Publish native AOT (${{ matrix.rid }})
+        shell: bash
+        env:
+          PROJECT_FILE: ${{ inputs.projectFile }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          RID: ${{ matrix.rid }}
+        run: |
+          dotnet publish "$PROJECT_FILE" \
+            --configuration "$CONFIGURATION" \
+            --runtime "$RID" \
+            --output "aot-publish"
+
+      - name: Run native AOT smoke test
+        shell: bash
+        env:
+          PROJECT_FILE: ${{ inputs.projectFile }}
+          EXECUTABLE_NAME: ${{ inputs.executableName }}
+        run: |
+          name="$EXECUTABLE_NAME"
+          if [ -z "$name" ]; then
+            name="$(basename "$PROJECT_FILE" .csproj)"
+          fi
+          binary="aot-publish/$name"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            binary="$binary.exe"
+          fi
+          echo "Running native AOT smoke binary: $binary"
+          "./$binary"
