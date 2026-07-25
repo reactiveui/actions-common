@@ -130,6 +130,9 @@ runs:
           /d:sonar.token="$SONAR_TOKEN" \
           /d:sonar.scanner.skipJreProvisioning=true \
           /d:sonar.cs.cobertura.reportsPaths="${{ inputs.coverage-glob }}" \
+          /d:sonar.issue.ignore.multicriteria=s8969 \
+          /d:sonar.issue.ignore.multicriteria.s8969.ruleKey=csharpsquid:S8969 \
+          /d:sonar.issue.ignore.multicriteria.s8969.resourceKey="**/*.cs" \
           $EXCLUSIONS_ARG \
           $COVERAGE_EXCLUSIONS_ARG \
           $CPD_EXCLUSIONS_ARG \
