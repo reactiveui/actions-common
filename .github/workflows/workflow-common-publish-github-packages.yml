@@ -24,7 +24,7 @@ jobs:
           name: ${{ inputs.artifactName }}
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
 
       - name: Push to GitHub Packages
         shell: bash
