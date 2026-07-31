@@ -1,10 +1,14 @@
 {
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-    "extends": ["local>reactiveui/.github:renovate"],
+    "extends": [
+        "local>reactiveui/.github:renovate"
+    ],
     "customManagers": [
         {
             "customType": "regex",
-            "fileMatch": ["^\\.github/actions/certum-sign/action\\.yml$"],
+            "managerFilePatterns": [
+                "/^\\.github/actions/certum-sign/action\\.yml$/"
+            ],
             "matchStrings": [
                 "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+default: '(?<currentValue>[^']+)'"
             ]
