@@ -116,6 +116,16 @@ on:
         default: false
         description: 'If true, run workload restore'
 
+      installWindowsAppRuntime:
+        type: boolean
+        default: false
+        description: 'If true, install the Windows App SDK runtime on the runner (needed to run WinUI tests)'
+
+      windowsAppRuntimeVersion:
+        type: string
+        default: '2.3'
+        description: 'Windows App SDK major.minor whose runtime to install when installWindowsAppRuntime is true'
+
 
       enableDetailedTestLogging:
         type: boolean
@@ -210,6 +220,38 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
           create-packages: 'false'
+
+      # An unpackaged WinUI test host resolves the Windows App SDK framework package through the bootstrapper
+      # at start-up. That package is a machine-level MSIX framework rather than an SDK workload, so workload
+      # restore does not supply it: without this the WinUI assemblies contribute no coverage to the scan.
+      - name: Install Windows App Runtime
+        if: inputs.installWindowsAppRuntime == true
+        shell: pwsh
+        env:
+          WINDOWS_APP_RUNTIME_VERSION: ${{ inputs.windowsAppRuntimeVersion }}
+        run: |
+          $version = $env:WINDOWS_APP_RUNTIME_VERSION
+          if ($version -notmatch '^\d+\.\d+$') {
+            throw "windowsAppRuntimeVersion must be <major>.<minor>, got '$version'."
+          }
+
+          $url = "https://aka.ms/windowsappsdk/$version/latest/windowsappruntimeinstall-x64.exe"
+          $exe = Join-Path $env:RUNNER_TEMP 'windowsappruntimeinstall-x64.exe'
+          Write-Host "Downloading Windows App Runtime $version"
+          Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
+
+          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru -NoNewWindow
+          # 0 succeeded; 0x80073D06 (-2147009274) means a newer runtime is already present, which is fine.
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne -2147009274) {
+            throw "Windows App Runtime install failed with exit code $($p.ExitCode)."
+          }
+
+          $names = @(Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime*' | Select-Object -ExpandProperty Name -Unique)
+          if ($names.Count -eq 0) {
+            throw 'Windows App Runtime install reported success but no runtime package is registered.'
+          }
+
+          Write-Host "Registered runtimes: $($names -join ', ')"
 
       - name: Test
         if: inputs.performTests == true
