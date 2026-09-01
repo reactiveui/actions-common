@@ -8,6 +8,14 @@
             "matchStrings": [
                 "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+default: '(?<currentValue>[^']+)'"
             ]
+        },
+        {
+            "description": "Annotated ARG versions in the certum-signer image. The dockerfile manager only tracks FROM images, so without this the pinned jsign version drifts silently.",
+            "customType": "regex",
+            "managerFilePatterns": ["/^docker/certum-signer/Dockerfile$/"],
+            "matchStrings": [
+                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\w+=(?<currentValue>\\S+)"
+            ]
         }
     ]
 }
