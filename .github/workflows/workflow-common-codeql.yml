@@ -119,6 +119,12 @@ jobs:
       with:
         languages: actions
         queries: security-extended
+        # Adds `reactiveui` to the trusted-publisher allowlist the
+        # actions/unpinned-tag query consults, so a repo referencing this repo's
+        # reusable workflows by ref is not reported as an unpinned third-party
+        # action. Actions published by anyone else are unaffected. Published by
+        # .github/workflows/publish-codeql-model-pack.yml.
+        packs: reactiveui/actions-trusted-owners
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4

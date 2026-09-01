@@ -1,0 +1,55 @@
+name: Publish CodeQL model pack
+
+# Publishes the org's CodeQL model pack to GHCR so the shared CodeQL workflow can
+# resolve it by name. The pack adds `reactiveui` to the trusted-publisher
+# allowlist for the `actions/unpinned-tag` query, which otherwise reports every
+# repo's `reactiveui/actions-common/...@main` reference as an unpinned
+# third-party action.
+#
+# `codeql pack publish` refuses to overwrite an existing version, so bump
+# `version:` in codeql/actions-trusted-owners/qlpack.yml whenever the models
+# change; a forgotten bump fails this workflow rather than publishing silently.
+#
+# The pack metadata lives in qlpack.yml rather than codeql-pack.yml on purpose:
+# the CLI only honours `extensionTargets` from the former, and silently ignores
+# it in the latter, which leaves the data extension inert.
+#
+# One-time setup: the package is created private. Consuming repositories
+# authenticate with their own GITHUB_TOKEN, which cannot read a private package
+# owned by another repository, so it has to be switched to public once in the
+# package settings before their code scanning runs can resolve it.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'codeql/actions-trusted-owners/**'
+      - '.github/workflows/publish-codeql-model-pack.yml'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish pack
+    runs-on: ubuntu-latest
+    env:
+      # Read by both `gh` and `codeql pack publish`.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PACK_DIR: codeql/actions-trusted-owners
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install the CodeQL CLI
+        run: |
+          set -euxo pipefail
+          gh extension install github/gh-codeql
+          gh codeql set-version latest
+
+      - name: Resolve pack dependencies
+        run: gh codeql pack install "$PACK_DIR"
+
+      - name: Publish pack
+        run: gh codeql pack publish "$PACK_DIR"
