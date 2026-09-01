@@ -16,7 +16,7 @@ FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_TAG}
 # Certum's file host, so bump this manually when Certum ships a new version.
 ARG SIMPLYSIGN_BIN_URL=https://files.certum.eu/software/SimplySignDesktop/Linux-Ubuntu/2.9.14-9.4.3.0/SimplySignDesktop-2.9.14-9.4.3.0-x86_64-prod-ubuntu.bin
 # renovate: datasource=maven depName=net.jsign:jsign
-ARG JSIGN_VERSION=7.4
+ARG JSIGN_VERSION=7.5
 
 ENV DEBIAN_FRONTEND=noninteractive
 
