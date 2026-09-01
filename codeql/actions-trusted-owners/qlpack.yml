@@ -1,0 +1,7 @@
+name: reactiveui/actions-trusted-owners
+version: 0.1.0
+library: true
+extensionTargets:
+  codeql/actions-all: '>=0.4.3 <2.0.0'
+dataExtensions:
+  - models/**/*.yml

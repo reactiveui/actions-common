@@ -1,0 +1,16 @@
+# Adds the reactiveui organisation to the trusted-publisher allowlist the CodeQL
+# `actions/unpinned-tag` query consults, alongside its built-in `actions`,
+# `github` and `advanced-security` owners.
+#
+# Every repository in the org consumes this repo's reusable workflows by ref
+# (`reactiveui/actions-common/.github/workflows/*@main`), and the query reports
+# each one as an unpinned third-party reference. Those refs are first-party and
+# deliberately track main, so they are not the supply-chain exposure the query
+# exists to catch. Actions published by anyone else stay in scope and are still
+# reported when they are referenced by a mutable tag.
+extensions:
+  - addsTo:
+      pack: codeql/actions-all
+      extensible: trustedActionsOwnerDataModel
+    data:
+      - ["reactiveui"]
