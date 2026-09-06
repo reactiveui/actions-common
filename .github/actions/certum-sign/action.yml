@@ -146,10 +146,29 @@ runs:
         done
         xdotool windowactivate --sync "$WID" || true
         xdotool mousemove $((BX + BW/2)) $((BY + BH*94/100)) click 1
-        sleep 3
 
-        # Confirm the token is active (this also fails fast if login didn't take).
-        timeout 60 pkcs11-tool --module "$SS_PKCS11" -L
+        # Wait for the token to carry a certificate, not merely to exist. The card mounts and
+        # reports "token initialized" before its objects are populated, so listing slots proves
+        # only that the card is present - and signing then fails with "No certificate found in
+        # the keystore", always on the first package. Gate on the object signing actually needs.
+        ready=0
+        for attempt in $(seq 1 30); do
+          if timeout 60 pkcs11-tool --module "$SS_PKCS11" -O --type cert 2>/dev/null \
+               | grep -q 'Certificate Object'; then
+            echo "certificate visible on token (attempt $attempt)"
+            ready=1
+            break
+          fi
+          sleep 2
+        done
+
+        # Fails fast if the login never took, and prints the slot listing to tell that case
+        # (no token at all) apart from a token whose certificate never appeared.
+        [ "$ready" = 1 ] || {
+          echo "::error::token exposed no certificate after login"
+          timeout 60 pkcs11-tool --module "$SS_PKCS11" -L || true
+          exit 1
+        }
 
     - name: Sign packages with jsign + verify
       shell: bash
