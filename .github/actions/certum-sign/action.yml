@@ -147,28 +147,17 @@ runs:
         xdotool windowactivate --sync "$WID" || true
         xdotool mousemove $((BX + BW/2)) $((BY + BH*94/100)) click 1
 
-        # Wait for the token to carry a certificate, not merely to exist. The card mounts and
-        # reports "token initialized" before its objects are populated, so listing slots proves
-        # only that the card is present - and signing then fails with "No certificate found in
-        # the keystore", always on the first package. Gate on the object signing actually needs.
-        ready=0
-        for attempt in $(seq 1 30); do
-          if timeout 60 pkcs11-tool --module "$SS_PKCS11" -O --type cert 2>/dev/null \
-               | grep -q 'Certificate Object'; then
-            echo "certificate visible on token (attempt $attempt)"
-            ready=1
-            break
-          fi
-          sleep 2
-        done
+        sleep 3
 
-        # Fails fast if the login never took, and prints the slot listing to tell that case
-        # (no token at all) apart from a token whose certificate never appeared.
-        [ "$ready" = 1 ] || {
-          echo "::error::token exposed no certificate after login"
-          timeout 60 pkcs11-tool --module "$SS_PKCS11" -L || true
-          exit 1
-        }
+        # Confirm the token is active (this also fails fast if login didn't take): the module
+        # enumerates the slot only once the cloud session is up.
+        #
+        # It says nothing about whether the token's objects are populated, and nothing here can.
+        # A bare pkcs11-tool session sees only what the token exposes publicly, which is not the
+        # view the provider jsign loads gets - this token lists no certificate object there even
+        # when signing works. Waiting on that listing waits forever; the wait belongs on the
+        # signing call, which is the only thing that sees the keystore jsign sees.
+        timeout 60 pkcs11-tool --module "$SS_PKCS11" -L
 
     - name: Sign packages with jsign + verify
       shell: bash
@@ -189,10 +178,29 @@ runs:
 
         for pkg in "${pkgs[@]}"; do
           echo "::group::sign $pkg"
-          # Single call: the token has one key (jsign auto-selects it). RFC3161
-          # timestamp so the signature outlives the cert. --replace is harmless.
-          java -jar "$JAR" --storetype PKCS11 --keystore "$CONF" --storepass "" \
-            --alg SHA-256 --tsmode RFC3161 --tsaurl "$TS_URL" --replace "$pkg"
+          # The token enumerates before its objects are populated, so the keystore can still
+          # report no certificate for a few seconds after login - which hits the first package
+          # and, left alone, fails roughly one run in ten. Retry that one message and let every
+          # other failure through on the first attempt; the token has one key, so jsign
+          # auto-selects it. RFC3161 timestamp so the signature outlives the cert.
+          signed=0
+          for attempt in $(seq 1 15); do
+            if out="$(java -jar "$JAR" --storetype PKCS11 --keystore "$CONF" --storepass "" \
+                        --alg SHA-256 --tsmode RFC3161 --tsaurl "$TS_URL" --replace "$pkg" 2>&1)"; then
+              printf '%s\n' "$out"
+              signed=1
+              break
+            fi
+
+            printf '%s\n' "$out"
+            case "$out" in
+              *'No certificate found'*) echo "keystore not populated yet (attempt $attempt)" ;;
+              *) exit 1 ;;
+            esac
+            sleep 4
+          done
+
+          [ "$signed" = 1 ] || { echo "::error::keystore exposed no certificate to jsign"; exit 1; }
           dotnet nuget verify "$pkg" --all --verbosity detailed
           echo "::endgroup::"
         done
