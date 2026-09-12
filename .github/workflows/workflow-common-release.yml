@@ -143,7 +143,6 @@ jobs:
           # here re-releases historical source with the current signing pipeline.
           ref: ${{ inputs.ref }}
           fetch-depth: 0
-          lfs: true
 
       - name: Resolve built commit SHA
         id: sourcesha

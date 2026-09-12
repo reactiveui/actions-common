@@ -225,7 +225,6 @@ jobs:
           # safe to interpolate into the ref.
           ref: refs/pull/${{ steps.prargs.outputs.number }}/head
           fetch-depth: 0
-          lfs: true
           persist-credentials: false
 
       - name: Setup .NET Environment
