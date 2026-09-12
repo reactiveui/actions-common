@@ -116,7 +116,7 @@ jobs:
           solution-file: ${{ inputs.solutionFile }}
           install-workloads: ${{ inputs.installWorkloads }}
 
-      - name: Build the solution
+      - name: Build solution
         if: inputs.solutionFile != ''
         uses: reactiveui/actions-common/.github/actions/dotnet-build@main
         with:
@@ -124,7 +124,7 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
 
-      - name: Run the benchmarks (Windows)
+      - name: Run benchmarks (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         working-directory: ${{ inputs.srcFolder }}
@@ -167,7 +167,7 @@ jobs:
               Write-Host '::endgroup::'
           }
 
-      - name: Run the benchmarks (Unix)
+      - name: Run benchmarks (Unix)
         if: runner.os != 'Windows'
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
@@ -223,7 +223,7 @@ jobs:
             echo '::endgroup::'
           done <<< "$PROJECTS"
 
-      - name: Verify that something was measured
+      - name: Validate benchmark reports
         shell: pwsh
         run: |
           # BenchmarkDotNet reports a validation error and exits zero, so a run that measured nothing
@@ -239,7 +239,7 @@ jobs:
           }
           if ($unmeasured) { throw "These benchmarks measured nothing: $($unmeasured -join '; ')" }
 
-      - name: Collect the reports into the run summary
+      - name: Publish results to run summary
         if: always()
         shell: pwsh
         env:
@@ -298,7 +298,7 @@ jobs:
               )
           }
 
-      - name: Upload the full reports
+      - name: Upload benchmark reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
