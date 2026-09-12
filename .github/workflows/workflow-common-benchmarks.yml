@@ -1,0 +1,308 @@
+name: Common benchmarks workflow
+
+permissions:
+  contents: read
+
+concurrency:
+  group: common-benchmarks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        type: string
+        required: true
+        description: 'Newline-separated list of benchmark projects (.csproj) to run, relative to srcFolder. Blank lines are skipped, so a caller can build the list from a suite choice.'
+
+      filter:
+        type: string
+        default: '*'
+        description: 'BenchmarkDotNet filter, passed through as --filter.'
+
+      runsOn:
+        type: string
+        default: 'windows-latest'
+        description: 'Runner to measure on. Windows by default: it is the only host that can launch a .NET Framework job, and its image carries the C++ toolchain the NativeAOT jobs link with.'
+
+      configuration:
+        type: string
+        default: 'Release'
+        description: 'Build configuration. Release is the only one worth measuring; a Debug build measures the absence of the optimiser.'
+
+      hostFramework:
+        type: string
+        default: 'net10.0'
+        description: 'Target framework the host process launches under. It only runs the switcher - which runtimes are measured comes from the job attributes on each benchmark class.'
+
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+          11.0.x
+        description: 'Newline-separated list of .NET SDKs to install. It must cover every runtime the benchmark classes declare a job for, not just the host.'
+
+      srcFolder:
+        type: string
+        default: 'src'
+        description: 'Folder holding the solution and the benchmark projects.'
+
+      solutionFile:
+        type: string
+        default: ''
+        description: 'Solution to restore and build before measuring, relative to srcFolder. Empty skips it, leaving each benchmark run to build what it needs.'
+
+      installWorkloads:
+        type: boolean
+        default: false
+        description: 'Run workload restore during environment setup. Needed when the solution carries a project that requires one, such as a MAUI head.'
+
+      buildOutputPath:
+        type: string
+        default: ''
+        description: 'Output root for the measured build. Empty picks one per host: a drive-root path on Windows, and nothing elsewhere. BenchmarkDotNet generates a project per job beside the built assembly and the NativeAOT build writes below that again, which on Windows puts the linker path past 260 characters from an ordinary checkout - the NativeAOT jobs then report NA while the run still exits zero.'
+
+      exporters:
+        type: string
+        default: 'github json html csv'
+        description: 'Space-separated BenchmarkDotNet exporters. The github markdown one is what the run summary is built from.'
+
+      raisePriority:
+        type: boolean
+        default: true
+        description: 'Raise the priority of the measured processes. A hosted runner is a shared virtual machine, so this removes the scheduling noise that is ours to remove; the figures remain trend and regression evidence rather than absolutes.'
+
+      artifactName:
+        type: string
+        default: 'benchmark-reports'
+        description: 'Name of the artifact the full reports are uploaded under.'
+
+      retentionDays:
+        type: number
+        default: 30
+        description: 'How long to keep the uploaded reports.'
+
+      summaryBudgetKb:
+        type: number
+        default: 900
+        description: 'How much of the run summary to fill with report tables. A step summary is dropped whole once it passes 1 MiB, so the tables stop being appended before that and the artifact carries the rest.'
+
+      timeoutMinutes:
+        type: number
+        default: 360
+        description: 'Job timeout. A whole suite across several runtimes takes hours.'
+
+jobs:
+  benchmark:
+    runs-on: ${{ inputs.runsOn }}
+    timeout-minutes: ${{ inputs.timeoutMinutes }}
+
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+
+      - name: Build the solution
+        if: inputs.solutionFile != ''
+        uses: reactiveui/actions-common/.github/actions/dotnet-build@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+
+      - name: Run the benchmarks (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: ${{ inputs.srcFolder }}
+        env:
+          # Taken through the environment rather than interpolated into the command, so an input
+          # cannot extend it.
+          PROJECTS: ${{ inputs.projects }}
+          FILTER: ${{ inputs.filter }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          HOST_FRAMEWORK: ${{ inputs.hostFramework }}
+          EXPORTERS: ${{ inputs.exporters }}
+          BUILD_OUTPUT_PATH: ${{ inputs.buildOutputPath }}
+          RAISE_PRIORITY: ${{ inputs.raisePriority }}
+        run: |
+          $output = if ($env:BUILD_OUTPUT_PATH) { $env:BUILD_OUTPUT_PATH } else { 'C:\a' }
+
+          foreach ($project in ($env:PROJECTS -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+              $name = [System.IO.Path]::GetFileNameWithoutExtension($project)
+              Write-Host "::group::$name"
+
+              $arguments = @(
+                  'run', '--project', $project, '-c', $env:CONFIGURATION, '-f', $env:HOST_FRAMEWORK,
+                  '--artifacts-path', $output, '--',
+                  '--filter', $env:FILTER,
+                  '--artifacts', "$env:GITHUB_WORKSPACE/benchmark-artifacts/$name",
+                  '--exporters'
+              ) + ($env:EXPORTERS -split ' ' | Where-Object { $_ })
+
+              # Started detached so the priority can be raised on the handle; a child process inherits
+              # its parent's priority class, so the process BenchmarkDotNet spawns per job gets it too.
+              $run = Start-Process -FilePath 'dotnet' -ArgumentList $arguments -NoNewWindow -PassThru
+              if ($env:RAISE_PRIORITY -eq 'true') {
+                  try { $run.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High }
+                  catch { Write-Host "::warning::Could not raise the benchmark priority: $($_.Exception.Message)" }
+              }
+
+              $run.WaitForExit()
+              if ($run.ExitCode -ne 0) { throw "$name exited with $($run.ExitCode)" }
+
+              Write-Host '::endgroup::'
+          }
+
+      - name: Run the benchmarks (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        working-directory: ${{ inputs.srcFolder }}
+        env:
+          PROJECTS: ${{ inputs.projects }}
+          FILTER: ${{ inputs.filter }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          HOST_FRAMEWORK: ${{ inputs.hostFramework }}
+          EXPORTERS: ${{ inputs.exporters }}
+          BUILD_OUTPUT_PATH: ${{ inputs.buildOutputPath }}
+          RAISE_PRIORITY: ${{ inputs.raisePriority }}
+        run: |
+          # Lowering a nice value needs the right to do it, and what a process may ask for is capped by
+          # RLIMIT_NICE: `ulimit -e` reports the ceiling, where 40 permits -20 and the usual 0 permits
+          # nothing at all. Renicing the shell is the way in, because children inherit the value, so it
+          # covers the processes BenchmarkDotNet spawns per job. Every route is best-effort: a run at the
+          # default priority is worth having, a failed run is not.
+          if [ "$RAISE_PRIORITY" = 'true' ]; then
+            ceiling=$(ulimit -e 2>/dev/null || echo 0)
+            target=$((20 - ceiling))
+
+            if [ "$target" -lt 0 ]; then
+              renice -n "$target" -p $$ > /dev/null 2>&1 \
+                && echo "Benchmarks renice to $target, permitted by RLIMIT_NICE." \
+                || echo "::warning::RLIMIT_NICE permits $target but renice refused it."
+            elif sudo -n true 2>/dev/null; then
+              sudo renice -n -20 -p $$ > /dev/null 2>&1 \
+                && echo 'Benchmarks renice to -20 through sudo.' \
+                || echo '::warning::Could not raise the benchmark priority through sudo.'
+            else
+              echo "::warning::RLIMIT_NICE permits no better than $target and sudo is unavailable, so the benchmarks run at the default priority."
+            fi
+          fi
+
+          while IFS= read -r project; do
+            project="$(echo "$project" | tr -d '[:space:]')"
+            [ -n "$project" ] || continue
+
+            name="$(basename "$project" .csproj)"
+            echo "::group::$name"
+
+            arguments=(run --project "$project" -c "$CONFIGURATION" -f "$HOST_FRAMEWORK")
+            if [ -n "$BUILD_OUTPUT_PATH" ]; then
+              arguments+=(--artifacts-path "$BUILD_OUTPUT_PATH")
+            fi
+            arguments+=(-- --filter "$FILTER" --artifacts "$GITHUB_WORKSPACE/benchmark-artifacts/$name" --exporters)
+            # Word splitting is what turns the space-separated list into separate arguments.
+            # shellcheck disable=SC2206
+            arguments+=($EXPORTERS)
+
+            dotnet "${arguments[@]}"
+
+            echo '::endgroup::'
+          done <<< "$PROJECTS"
+
+      - name: Verify that something was measured
+        shell: pwsh
+        run: |
+          # BenchmarkDotNet reports a validation error and exits zero, so a run that measured nothing
+          # looks identical to a clean one. The exported reports are the evidence it ran.
+          $produced = Get-ChildItem -Path "$env:GITHUB_WORKSPACE/benchmark-artifacts" -Recurse -Filter '*-report-github.md' -ErrorAction SilentlyContinue
+          if ($produced.Count -eq 0) { throw 'No benchmark reports were produced. Check the validation errors above.' }
+
+          # A job whose build fails still exports its rows, with every measurement written as NA.
+          # Reading the tables is the only way to tell that apart from a run that measured.
+          $unmeasured = foreach ($report in $produced) {
+              $rows = @(Get-Content -Path $report.FullName | Where-Object { $_ -match '^\|' -and $_ -match '\|\s*NA\s*\|' })
+              if ($rows.Count -gt 0) { '{0} ({1} rows)' -f ($report.Name -replace '-report-github\.md$', ''), $rows.Count }
+          }
+          if ($unmeasured) { throw "These benchmarks measured nothing: $($unmeasured -join '; ')" }
+
+      - name: Collect the reports into the run summary
+        if: always()
+        shell: pwsh
+        env:
+          FILTER: ${{ inputs.filter }}
+          BUDGET_KB: ${{ inputs.summaryBudgetKb }}
+          ARTIFACT_NAME: ${{ inputs.artifactName }}
+        run: |
+          $summary = $env:GITHUB_STEP_SUMMARY
+          $root = "$env:GITHUB_WORKSPACE/benchmark-artifacts"
+          $budget = [int]$env:BUDGET_KB * 1KB
+
+          Add-Content -Path $summary -Value @(
+              '# Benchmark results',
+              '',
+              "Filter ``$env:FILTER``, commit ``$env:GITHUB_SHA``, measured on ``$env:RUNNER_OS``.",
+              '',
+              'Each section is one benchmark class. The runtimes measured are whichever jobs that class',
+              'declares, so a class with no NativeAOT row cannot run ahead-of-time at all. A hosted runner',
+              'is shared, so read these for trend and regression rather than as absolute figures.',
+              "Full JSON, HTML and CSV exports are attached to this run as ``$env:ARTIFACT_NAME``.",
+              ''
+          )
+
+          if (-not (Test-Path $root)) {
+              Add-Content -Path $summary -Value 'No benchmark artifacts were produced.'
+              exit 0
+          }
+
+          $reports = Get-ChildItem -Path $root -Recurse -Filter '*-report-github.md' | Sort-Object FullName
+          if ($reports.Count -eq 0) {
+              Add-Content -Path $summary -Value 'No GitHub-markdown reports were exported.'
+              exit 0
+          }
+
+          $skipped = @()
+          foreach ($report in $reports) {
+              $title = $report.Name -replace '-report-github\.md$', ''
+
+              if ((Get-Item $summary).Length + $report.Length -gt $budget) {
+                  $skipped += $title
+                  continue
+              }
+
+              # BenchmarkDotNet's own exporter produces the table; collapsing each class keeps the page
+              # scannable when a whole suite has run.
+              Add-Content -Path $summary -Value @("<details><summary>$title</summary>", '')
+              Get-Content -Path $report.FullName | Add-Content -Path $summary
+              Add-Content -Path $summary -Value @('', '</details>', '')
+          }
+
+          if ($skipped.Count -gt 0) {
+              Add-Content -Path $summary -Value @(
+                  '',
+                  "Omitted here to stay inside the summary limit: $($skipped -join ', '). Read them in the $env:ARTIFACT_NAME artifact.",
+                  ''
+              )
+          }
+
+      - name: Upload the full reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.artifactName }}
+          path: benchmark-artifacts/**
+          if-no-files-found: error
+          retention-days: ${{ inputs.retentionDays }}
