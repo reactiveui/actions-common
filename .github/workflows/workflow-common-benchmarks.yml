@@ -102,6 +102,11 @@ jobs:
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
 
+      # The build server is of no use to a job that builds each project once, and every attempt to
+      # reach it waits out a connect timeout before falling back in-process. Leaving it off also keeps
+      # a server process from lingering to compete with what is being measured.
+      DOTNET_CLI_USE_MSBUILD_SERVER: 0
+
     steps:
       - name: Checkout
         uses: actions/checkout@v7
