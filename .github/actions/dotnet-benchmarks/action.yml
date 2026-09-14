@@ -38,8 +38,11 @@ runs:
 
     - name: Run benchmarks
       shell: bash
+      env:
+        PROJECTS: ${{ inputs.projects }}
+        RESULTS_FOLDER: ${{ inputs.results-folder }}
       run: |
-        cd "$RUNNER_TEMP" && dotnet run - -- "${{ inputs.projects }}" "${{ inputs.results-folder }}" <<'CS'
+        cd "$RUNNER_TEMP" && dotnet run - -- "$PROJECTS" "$RESULTS_FOLDER" <<'CS'
         using System.Diagnostics;
         using static System.Environment;
 

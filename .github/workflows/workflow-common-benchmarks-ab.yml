@@ -61,7 +61,7 @@ jobs:
       - name: Compare base and head
         shell: bash
         run: |
-          cd "$RUNNER_TEMP" && dotnet run - -- "${{ runner.temp }}/benchmark-ab/base" "${{ runner.temp }}/benchmark-ab/head" <<'CS'
+          cd "$RUNNER_TEMP" && dotnet run - -- "$RUNNER_TEMP/benchmark-ab/base" "$RUNNER_TEMP/benchmark-ab/head" <<'CS'
           using System.Globalization;
           using System.Text.Json;
           using System.Text.RegularExpressions;

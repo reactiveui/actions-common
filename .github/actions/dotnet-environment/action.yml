@@ -120,8 +120,11 @@ runs:
     - name: Restore .NET Workloads
       if: inputs.install-workloads == 'true'
       shell: bash
+      env:
+        SRC_FOLDER: ${{ inputs.src-folder }}
+        SOLUTION_FILE: ${{ inputs.solution-file }}
       run: |
-        cd "$RUNNER_TEMP" && dotnet run - -- "${{ inputs.src-folder }}" "${{ inputs.solution-file }}" <<'CS'
+        cd "$RUNNER_TEMP" && dotnet run - -- "$SRC_FOLDER" "$SOLUTION_FILE" <<'CS'
         using System.Diagnostics;
         using static System.Environment;
 
