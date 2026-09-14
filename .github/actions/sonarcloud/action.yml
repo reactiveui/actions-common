@@ -64,10 +64,17 @@ runs:
     - name: Validate SONAR_TOKEN is in scope
       shell: bash
       run: |
-        if [ -z "${SONAR_TOKEN:-}" ]; then
-          echo "::error::SONAR_TOKEN is not set in the job/step env. Map the SONAR_TOKEN secret into env on the calling job/step (see this action's description)."
-          exit 1
-        fi
+        cd "$RUNNER_TEMP" && dotnet run - <<'CS'
+        using static System.Environment;
+
+        if (GetEnvironmentVariable("SONAR_TOKEN") is not { Length: > 0 })
+        {
+            Console.WriteLine("::error::SONAR_TOKEN is not set in the job/step env. Map the SONAR_TOKEN secret into env on the calling job/step (see this action's description).");
+            return 1;
+        }
+
+        return 0;
+        CS
 
     - name: Set up JDK 25 (SonarScanner prerequisite)
       # skipJreProvisioning runs the scanner on this JDK instead of downloading a JRE.
@@ -87,53 +94,57 @@ runs:
     - name: SonarScanner begin
       if: inputs.mode == 'begin'
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       env:
-        # Git Bash on Windows rewrites path-like arguments, mangling the scanner's /k: /o: /d: /v: switches.
+        # Git Bash on Windows rewrites path-like arguments, mangling the /d: switches in extra-begin-args.
         MSYS2_ARG_CONV_EXCL: '*'
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        PROJECT_KEY: ${{ inputs.project-key }}
+        ORGANIZATION: ${{ inputs.organization }}
+        HOST_URL: ${{ inputs.host-url }}
+        VERSION: ${{ inputs.version }}
+        COVERAGE_GLOB: ${{ inputs.coverage-glob }}
+        EXTRA_BEGIN_ARGS: ${{ inputs.extra-begin-args }}
+        EXCLUSIONS: ${{ inputs.exclusions }}
+        COVERAGE_EXCLUSIONS: ${{ inputs.coverage-exclusions }}
+        CPD_EXCLUSIONS: ${{ inputs.cpd-exclusions }}
+        TEST_EXCLUSIONS: ${{ inputs.test-exclusions }}
       run: |
-        VERSION_ARG=""
-        if [ -n "${{ inputs.version }}" ]; then
-          VERSION_ARG="/v:${{ inputs.version }}"
-        fi
-        ORG_ARG=""
-        if [ -n "${{ inputs.organization }}" ]; then
-          ORG_ARG="/o:${{ inputs.organization }}"
-        fi
-        EXCLUSIONS_ARG=""
-        if [ -n "${{ inputs.exclusions }}" ]; then
-          EXCLUSIONS_ARG="/d:sonar.exclusions=${{ inputs.exclusions }}"
-        fi
-        COVERAGE_EXCLUSIONS_ARG=""
-        if [ -n "${{ inputs.coverage-exclusions }}" ]; then
-          COVERAGE_EXCLUSIONS_ARG="/d:sonar.coverage.exclusions=${{ inputs.coverage-exclusions }}"
-        fi
-        CPD_EXCLUSIONS_ARG=""
-        if [ -n "${{ inputs.cpd-exclusions }}" ]; then
-          CPD_EXCLUSIONS_ARG="/d:sonar.cpd.exclusions=${{ inputs.cpd-exclusions }}"
-        fi
-        TEST_EXCLUSIONS_ARG=""
-        if [ -n "${{ inputs.test-exclusions }}" ]; then
-          TEST_EXCLUSIONS_ARG="/d:sonar.test.exclusions=${{ inputs.test-exclusions }}"
-        fi
+        cd "$RUNNER_TEMP" && dotnet run - -- "$WORKING_DIRECTORY" "$PROJECT_KEY" "$ORGANIZATION" "$HOST_URL" "$VERSION" "$COVERAGE_GLOB" "$EXTRA_BEGIN_ARGS" "$EXCLUSIONS" "$COVERAGE_EXCLUSIONS" "$CPD_EXCLUSIONS" "$TEST_EXCLUSIONS" <<'CS'
+        using System.Diagnostics;
+        using static System.Environment;
 
-        # shellcheck disable=SC2086
-        dotnet sonarscanner begin \
-          /k:"${{ inputs.project-key }}" \
-          $ORG_ARG \
-          /d:sonar.host.url="${{ inputs.host-url }}" \
-          /d:sonar.token="$SONAR_TOKEN" \
-          /d:sonar.scanner.skipJreProvisioning=true \
-          /d:sonar.cs.cobertura.reportsPaths="${{ inputs.coverage-glob }}" \
-          /d:sonar.issue.ignore.multicriteria=s8969 \
-          /d:sonar.issue.ignore.multicriteria.s8969.ruleKey=csharpsquid:S8969 \
-          /d:sonar.issue.ignore.multicriteria.s8969.resourceKey="**/*.cs" \
-          $EXCLUSIONS_ARG \
-          $COVERAGE_EXCLUSIONS_ARG \
-          $CPD_EXCLUSIONS_ARG \
-          $TEST_EXCLUSIONS_ARG \
-          $VERSION_ARG \
-          ${{ inputs.extra-begin-args }}
+        if (args is not [var workingDirectory, var projectKey, var organization, var hostUrl, var version, var coverageGlob, var extraBeginArgs, var exclusions, var coverageExclusions, var cpdExclusions, var testExclusions])
+        {
+            Console.WriteLine("::error::Expected the eleven SonarScanner begin arguments.");
+            return 2;
+        }
+
+        Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, workingDirectory));
+
+        return Process.Run(
+            "dotnet",
+            [
+                "sonarscanner", "begin",
+                $"/k:{projectKey}",
+                .. Switch("/o:", organization),
+                $"/d:sonar.host.url={hostUrl}",
+                $"/d:sonar.token={GetEnvironmentVariable("SONAR_TOKEN")}",
+                "/d:sonar.scanner.skipJreProvisioning=true",
+                $"/d:sonar.cs.cobertura.reportsPaths={coverageGlob}",
+                "/d:sonar.issue.ignore.multicriteria=s8969",
+                "/d:sonar.issue.ignore.multicriteria.s8969.ruleKey=csharpsquid:S8969",
+                "/d:sonar.issue.ignore.multicriteria.s8969.resourceKey=**/*.cs",
+                .. Switch("/d:sonar.exclusions=", exclusions),
+                .. Switch("/d:sonar.coverage.exclusions=", coverageExclusions),
+                .. Switch("/d:sonar.cpd.exclusions=", cpdExclusions),
+                .. Switch("/d:sonar.test.exclusions=", testExclusions),
+                .. Switch("/v:", version),
+                .. extraBeginArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+            ]).ExitCode;
+
+        // An empty value leaves its switch out.
+        static string[] Switch(string name, string value) => value is "" ? [] : [name + value];
+        CS
 
     - name: SonarScanner end
       if: inputs.mode == 'end'

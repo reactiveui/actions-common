@@ -20,17 +20,34 @@ jobs:
         with:
           name: ${{ inputs.artifactName }}
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v6
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
 
       - name: Push to GitHub Packages
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          for pkg in *.nupkg; do
-            dotnet nuget push "$pkg" \
-              --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
-              --api-key "$GITHUB_TOKEN" \
-              --skip-duplicate
-          done
+          cd "$RUNNER_TEMP" && dotnet run - <<'CS'
+          using System.Diagnostics;
+          using static System.Environment;
+
+          if (Directory.GetFiles(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "*.nupkg") is not [_, ..] packages)
+          {
+              Console.WriteLine("::error::The artifact holds no .nupkg files.");
+              return 1;
+          }
+
+          var source = $"https://nuget.pkg.github.com/{GetEnvironmentVariable("GITHUB_REPOSITORY_OWNER")}/index.json";
+          foreach (var package in packages.Order(StringComparer.Ordinal))
+          {
+              if (Process.Run("dotnet", ["nuget", "push", package, "--source", source, "--api-key", GetEnvironmentVariable("GITHUB_TOKEN")!, "--skip-duplicate"]) is { ExitCode: not 0 } push)
+              {
+                  return push.ExitCode;
+              }
+          }
+
+          return 0;
+          CS

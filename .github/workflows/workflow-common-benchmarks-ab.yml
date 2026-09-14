@@ -67,9 +67,15 @@ jobs:
           using System.Text.RegularExpressions;
           using static System.Environment;
 
+          if (args is not [var baseFolder, var headFolder])
+          {
+              Console.WriteLine("::error::Expected the base and head results folder arguments.");
+              return 2;
+          }
+
           // A benchmark is faster or slower only when the 99.9% confidence intervals of its two means do not overlap.
-          var baseResults = Load(args[0]);
-          var headResults = Load(args[1]);
+          var baseResults = Load(baseFolder);
+          var headResults = Load(headFolder);
 
           using var summary = File.AppendText(GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!);
           summary.WriteLine("# A/B benchmark results");
@@ -92,6 +98,8 @@ jobs:
               var ratio = (after.Mean / before.Mean).ToString("0.000", CultureInfo.InvariantCulture);
               summary.WriteLine($"| {key} | {Format(before)} | {Format(after)} | {ratio} | {result} |");
           }
+
+          return 0;
 
           static Dictionary<string, Measurement> Load(string folder)
           {

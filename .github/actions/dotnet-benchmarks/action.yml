@@ -46,7 +46,11 @@ runs:
         using System.Diagnostics;
         using static System.Environment;
 
-        string projects = args[0], results = args[1];
+        if (args is not [var projects, var results])
+        {
+            Console.WriteLine("::error::Expected the projects and results folder arguments.");
+            return 2;
+        }
 
         // A short build path on Windows keeps the NativeAOT build under 260 characters.
         var output = OperatingSystem.IsWindows() ? @"C:\a" : Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "a");
@@ -64,7 +68,7 @@ runs:
                     "--filter", "*", "--artifacts", Path.Combine(results, name), "--exporters", "github", "fulljson",
                 ]);
 
-            if (status.ExitCode != 0)
+            if (status is { ExitCode: not 0 })
             {
                 return status.ExitCode;
             }

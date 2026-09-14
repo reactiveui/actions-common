@@ -78,82 +78,75 @@ runs:
         VERBOSITY: ${{ inputs.verbosity }}
         VERSION_OVERRIDE: ${{ inputs.version-override }}
       run: |
-        if [ -n "$VERSION_OVERRIDE" ]; then
-          SEMVER2="$VERSION_OVERRIDE"
-          echo "Version override supplied; skipping MinVer git walk. Using: $SEMVER2"
-        else
-          ARGS=(--tag-prefix "$TAG_PREFIX" --verbosity "$VERBOSITY" --auto-increment "$AUTO_INCREMENT")
-          if [ -n "$MINIMUM_MAJOR_MINOR" ]; then
-            ARGS+=(--minimum-major-minor "$MINIMUM_MAJOR_MINOR")
-          fi
-          if [ -n "$DEFAULT_PRE_RELEASE" ]; then
-            ARGS+=(--default-pre-release-identifiers "$DEFAULT_PRE_RELEASE")
-          fi
+        cd "$RUNNER_TEMP" && dotnet run - -- "$TAG_PREFIX" "$MINIMUM_MAJOR_MINOR" "$DEFAULT_PRE_RELEASE" "$AUTO_INCREMENT" "$VERBOSITY" "$VERSION_OVERRIDE" <<'CS'
+        using System.Diagnostics;
+        using static System.Environment;
 
-          SEMVER2=$(minver "${ARGS[@]}")
-          echo "MinVer produced: $SEMVER2"
-        fi
-
-        # Derive the rest by parsing SEMVER2: "<major>.<minor>.<patch>[-<pre>][+<meta>]"
-        VERSION_CORE="${SEMVER2%%[-+]*}"
-        IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_CORE"
-        REMAINDER="${SEMVER2#$VERSION_CORE}"
-        PRE_RELEASE=""
-        BUILD_META=""
-        case "$REMAINDER" in
-          -*)
-            REST="${REMAINDER#-}"
-            PRE_RELEASE="${REST%%+*}"
-            case "$REST" in *+*) BUILD_META="${REST#*+}";; esac
-            ;;
-          +*)
-            BUILD_META="${REMAINDER#+}"
-            ;;
-        esac
-
-        ASSEMBLY_VERSION="${MAJOR}.0.0.0"
-        ASSEMBLY_FILE_VERSION="${MAJOR}.${MINOR}.${PATCH}.0"
-
-        # Package feeds reject build metadata, so the NuGet version drops it.
-        if [ -n "$PRE_RELEASE" ]; then
-          NUGET_PACKAGE_VERSION="${VERSION_CORE}-${PRE_RELEASE}"
-        else
-          NUGET_PACKAGE_VERSION="$VERSION_CORE"
-        fi
-
-        FULL_SHA=$(git rev-parse HEAD)
-        SHORT_SHA=$(git rev-parse --short=7 HEAD)
-
-        VERSION_HEIGHT=0
-        if LAST_TAG=$(git describe --tags --abbrev=0 --match "${TAG_PREFIX}*" 2>/dev/null); then
-          VERSION_HEIGHT=$(git rev-list --count "${LAST_TAG}..HEAD")
-        else
-          VERSION_HEIGHT=$(git rev-list --count HEAD)
-        fi
-
+        if (args is not [var tagPrefix, var minimumMajorMinor, var defaultPreRelease, var autoIncrement, var verbosity, var versionOverride])
         {
-          echo "MINVER_SemVer2=${SEMVER2}"
-          echo "MINVER_SimpleVersion=${VERSION_CORE}"
-          echo "MINVER_AssemblyVersion=${ASSEMBLY_VERSION}"
-          echo "MINVER_AssemblyFileVersion=${ASSEMBLY_FILE_VERSION}"
-          echo "MINVER_AssemblyInformationalVersion=${SEMVER2}"
-          echo "MINVER_NuGetPackageVersion=${NUGET_PACKAGE_VERSION}"
-          echo "MINVER_GitCommitId=${FULL_SHA}"
-          echo "MINVER_GitCommitIdShort=${SHORT_SHA}"
-          echo "MINVER_VersionHeight=${VERSION_HEIGHT}"
-        } >> "$GITHUB_ENV"
+            Console.WriteLine("::error::Expected the tag prefix, minimum major.minor, pre-release identifiers, auto-increment, verbosity and version override arguments.");
+            return 2;
+        }
 
-        # MinVer's MSBuild task stamps this verbatim instead of walking git per project.
-        echo "MINVERVERSIONOVERRIDE=${SEMVER2}" >> "$GITHUB_ENV"
+        Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
 
+        string semVer2;
+        if (versionOverride is not "")
         {
-          echo "SemVer2=${SEMVER2}"
-          echo "SimpleVersion=${VERSION_CORE}"
-          echo "AssemblyVersion=${ASSEMBLY_VERSION}"
-          echo "AssemblyFileVersion=${ASSEMBLY_FILE_VERSION}"
-          echo "AssemblyInformationalVersion=${SEMVER2}"
-          echo "NuGetPackageVersion=${NUGET_PACKAGE_VERSION}"
-          echo "GitCommitId=${FULL_SHA}"
-          echo "GitCommitIdShort=${SHORT_SHA}"
-          echo "VersionHeight=${VERSION_HEIGHT}"
-        } >> "$GITHUB_OUTPUT"
+            semVer2 = versionOverride;
+            Console.WriteLine($"Version override supplied; skipping MinVer git walk. Using: {semVer2}");
+        }
+        else
+        {
+            var minver = Process.RunAndCaptureText(
+                "minver",
+                [
+                    "--tag-prefix", tagPrefix, "--verbosity", verbosity, "--auto-increment", autoIncrement,
+                    .. Option("--minimum-major-minor", minimumMajorMinor),
+                    .. Option("--default-pre-release-identifiers", defaultPreRelease),
+                ]);
+
+            Console.Error.Write(minver.StandardError);
+            if (minver is not { ExitStatus.ExitCode: 0, StandardOutput: var output })
+            {
+                return minver.ExitStatus.ExitCode;
+            }
+
+            semVer2 = output.Trim();
+            Console.WriteLine($"MinVer produced: {semVer2}");
+        }
+
+        // SemVer2 is "<major>.<minor>.<patch>[-<pre>][+<meta>]".
+        var core = semVer2.Split('-', '+')[0];
+        var preRelease = semVer2[core.Length..] is ['-', .. var rest] ? rest.Split('+')[0] : string.Empty;
+
+        var height = Process.RunAndCaptureText("git", ["describe", "--tags", "--abbrev=0", "--match", $"{tagPrefix}*"]) switch
+        {
+            { ExitStatus.ExitCode: 0, StandardOutput: var lastTag } => Git("rev-list", "--count", $"{lastTag.Trim()}..HEAD"),
+            _ => Git("rev-list", "--count", "HEAD"),
+        };
+
+        (string Name, string Value)[] values =
+        [
+            ("SemVer2", semVer2),
+            ("SimpleVersion", core),
+            ("AssemblyVersion", $"{core.Split('.')[0]}.0.0.0"),
+            ("AssemblyFileVersion", $"{core}.0"),
+            ("AssemblyInformationalVersion", semVer2),
+
+            // Package feeds reject build metadata, so the NuGet version drops it.
+            ("NuGetPackageVersion", preRelease is "" ? core : $"{core}-{preRelease}"),
+            ("GitCommitId", Git("rev-parse", "HEAD")),
+            ("GitCommitIdShort", Git("rev-parse", "--short=7", "HEAD")),
+            ("VersionHeight", height),
+        ];
+
+        // MinVer's MSBuild task stamps MINVERVERSIONOVERRIDE verbatim instead of walking git per project.
+        File.AppendAllLines(GetEnvironmentVariable("GITHUB_ENV")!, [.. values.Select(value => $"MINVER_{value.Name}={value.Value}"), $"MINVERVERSIONOVERRIDE={semVer2}"]);
+        File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!, values.Select(value => $"{value.Name}={value.Value}"));
+        return 0;
+
+        static string[] Option(string name, string value) => value is "" ? [] : [name, value];
+
+        static string Git(params IEnumerable<string> arguments) => Process.RunAndCaptureText("git", arguments).StandardOutput.Trim();
+        CS

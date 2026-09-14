@@ -124,7 +124,7 @@ jobs:
       name: release
     runs-on: ${{ inputs.buildOs }}
     outputs:
-      semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
+      semver2: ${{ steps.minver.outputs.SemVer2 }}
       tag: ${{ steps.tagname.outputs.tag }}
       prerelease: ${{ steps.tagname.outputs.prerelease }}
       sourceSha: ${{ steps.sourcesha.outputs.sha }}
@@ -134,6 +134,15 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+          stamp-version: 'false'
 
       - name: Resolve built commit SHA
         id: sourcesha
@@ -147,19 +156,29 @@ jobs:
           PRE_RELEASE: ${{ inputs.preRelease }}
           VERSION_OVERRIDE: ${{ inputs.versionOverride }}
         run: |
-          set -euo pipefail
-          if [ -n "$BUMP" ] && [ -n "$VERSION_OVERRIDE" ]; then
-            echo "::error::'bump' and 'versionOverride' are mutually exclusive — set exactly one."
-            exit 1
-          fi
-          if [ -n "$PRE_RELEASE" ] && [ -n "$VERSION_OVERRIDE" ]; then
-            echo "::error::'preRelease' cannot be combined with 'versionOverride' (the override is stamped verbatim — put any pre-release suffix in the override itself)."
-            exit 1
-          fi
-          if [ -n "$PRE_RELEASE" ] && [ -z "$BUMP" ]; then
-            echo "::error::'preRelease' requires 'bump' (major|minor|patch) so the channel has a core version to attach to."
-            exit 1
-          fi
+          cd "$RUNNER_TEMP" && dotnet run - -- "$BUMP" "$PRE_RELEASE" "$VERSION_OVERRIDE" <<'CS'
+          if (args is not [var bump, var preRelease, var versionOverride])
+          {
+              Console.WriteLine("::error::Expected the bump, pre-release and version override arguments.");
+              return 2;
+          }
+
+          string? error = (bump, preRelease, versionOverride) switch
+          {
+              (not "", _, not "") => "'bump' and 'versionOverride' are mutually exclusive — set exactly one.",
+              (_, not "", not "") => "'preRelease' cannot be combined with 'versionOverride' (the override is stamped verbatim — put any pre-release suffix in the override itself).",
+              ("", not "", _) => "'preRelease' requires 'bump' (major|minor|patch) so the channel has a core version to attach to.",
+              _ => null,
+          };
+
+          if (error is not null)
+          {
+              Console.WriteLine($"::error::{error}");
+              return 1;
+          }
+
+          return 0;
+          CS
 
       # workflow-common-create-release creates the tag, so a failed build or sign leaves no orphan tag.
       - name: Compute version and tag
@@ -182,38 +201,44 @@ jobs:
           VERSION_OVERRIDE: ${{ inputs.versionOverride }}
           TAG_PREFIX: ${{ inputs.minverTagPrefix }}
         run: |
-          set -euo pipefail
-          if [ -n "$VERSION_OVERRIDE" ]; then
-            TAG="${TAG_PREFIX}${VERSION_OVERRIDE}"
-            if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
-              echo "::error::Tag ${TAG} already exists. Refusing to re-release an existing version."
-              exit 1
-            fi
-            case "$VERSION_OVERRIDE" in *-*) PRERELEASE=true ;; *) PRERELEASE=false ;; esac
-            {
-              echo "tag=${TAG}"
-              echo "prerelease=${PRERELEASE}"
-            } >> "$GITHUB_OUTPUT"
-          else
-            {
-              echo "tag=${BUMP_TAG}"
-              echo "prerelease=${BUMP_PRERELEASE:-false}"
-            } >> "$GITHUB_OUTPUT"
-          fi
+          cd "$RUNNER_TEMP" && dotnet run - -- "$BUMP_TAG" "$BUMP_PRERELEASE" "$VERSION_OVERRIDE" "$TAG_PREFIX" <<'CS'
+          using System.Diagnostics;
+          using static System.Environment;
 
-      - name: Setup .NET Environment
-        id: environment
-        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+          if (args is not [var bumpTag, var bumpPrerelease, var versionOverride, var tagPrefix])
+          {
+              Console.WriteLine("::error::Expected the bump tag, bump pre-release, version override and tag prefix arguments.");
+              return 2;
+          }
+
+          var outputs = GetEnvironmentVariable("GITHUB_OUTPUT")!;
+          if (versionOverride is "")
+          {
+              File.AppendAllLines(outputs, [$"tag={bumpTag}", $"prerelease={(bumpPrerelease is "" ? "false" : bumpPrerelease)}"]);
+              return 0;
+          }
+
+          var tag = $"{tagPrefix}{versionOverride}";
+          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+          if (Process.Run("git", ["rev-parse", "-q", "--verify", $"refs/tags/{tag}"], silent: true) is { ExitCode: 0 })
+          {
+              Console.WriteLine($"::error::Tag {tag} already exists. Refusing to re-release an existing version.");
+              return 1;
+          }
+
+          File.AppendAllLines(outputs, [$"tag={tag}", $"prerelease={(versionOverride.Contains('-') ? "true" : "false")}"]);
+          return 0;
+          CS
+
+      - name: Stamp version with MinVer
+        id: minver
+        uses: reactiveui/actions-common/.github/actions/minver@main
         with:
-          dotnet-versions: ${{ inputs.dotnetVersions }}
-          src-folder: ${{ inputs.srcFolder }}
-          solution-file: ${{ inputs.solutionFile }}
-          install-workloads: ${{ inputs.installWorkloads }}
-          minver-tag-prefix: ${{ inputs.minverTagPrefix }}
-          minver-minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
-          minver-auto-increment: ${{ inputs.minverAutoIncrement }}
-          minver-default-pre-release-identifiers: ${{ inputs.minverDefaultPreReleaseIdentifiers }}
-          minver-version-override: ${{ inputs.versionOverride }}
+          tag-prefix: ${{ inputs.minverTagPrefix }}
+          minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
+          default-pre-release-identifiers: ${{ inputs.minverDefaultPreReleaseIdentifiers }}
+          auto-increment: ${{ inputs.minverAutoIncrement }}
+          version-override: ${{ inputs.versionOverride }}
 
       - name: Build (dotnet)
         if: inputs.useUNO == false

@@ -21,6 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
+
       - name: Log in to GHCR
         env:
           GHCR_USER: ${{ github.actor }}
@@ -28,13 +33,30 @@ jobs:
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
       - name: Build and push image
+        shell: bash
         run: |
-          set -euxo pipefail
-          TAG_SHA="$(date +%Y%m%d)-${GITHUB_SHA::7}"
-          docker build \
-            -t "$IMAGE:latest" \
-            -t "$IMAGE:$TAG_SHA" \
-            docker/certum-signer
-          docker push "$IMAGE:latest"
-          docker push "$IMAGE:$TAG_SHA"
-          echo "Pushed $IMAGE:latest and $IMAGE:$TAG_SHA"
+          cd "$RUNNER_TEMP" && dotnet run - <<'CS'
+          using System.Diagnostics;
+          using static System.Environment;
+
+          var image = GetEnvironmentVariable("IMAGE")!;
+          string[] references = [$"{image}:latest", $"{image}:{DateTime.UtcNow:yyyyMMdd}-{GetEnvironmentVariable("GITHUB_SHA")![..7]}"];
+
+          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+
+          if (Process.Run("docker", ["build", .. references.SelectMany(reference => (string[])["-t", reference]), "docker/certum-signer"]) is { ExitCode: not 0 } build)
+          {
+              return build.ExitCode;
+          }
+
+          foreach (var reference in references)
+          {
+              if (Process.Run("docker", ["push", reference]) is { ExitCode: not 0 } push)
+              {
+                  return push.ExitCode;
+              }
+          }
+
+          Console.WriteLine($"Pushed {string.Join(" and ", references)}");
+          return 0;
+          CS

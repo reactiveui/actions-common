@@ -149,16 +149,23 @@ jobs:
           using System.Diagnostics;
           using static System.Environment;
 
-          string projects = args[0], srcFolder = args[1], filter = args[2], configuration = args[3], hostFramework = args[4], exporters = args[5], buildOutputPath = args[6], raisePriority = args[7];
+          if (args is not [var projects, var srcFolder, var filter, var configuration, var hostFramework, var exporters, var buildOutputPath, var raisePriority])
+          {
+              Console.WriteLine("::error::Expected the eight benchmark run arguments.");
+              return 2;
+          }
 
           var workspace = GetEnvironmentVariable("GITHUB_WORKSPACE")!;
 
           // An empty build output path picks a drive root on Windows, where the NativeAOT build otherwise passes 260 characters.
-          string[] artifactsPath = buildOutputPath.Length > 0 ? ["--artifacts-path", buildOutputPath]
-              : OperatingSystem.IsWindows() ? ["--artifacts-path", @"C:\a"]
-              : [];
+          string[] artifactsPath = (buildOutputPath, OperatingSystem.IsWindows()) switch
+          {
+              (not "", _) => ["--artifacts-path", buildOutputPath],
+              (_, true) => ["--artifacts-path", @"C:\a"],
+              _ => [],
+          };
 
-          if (raisePriority == "true")
+          if (raisePriority is "true")
           {
               RaisePriority();
           }
@@ -179,7 +186,7 @@ jobs:
                   ]);
 
               Console.WriteLine("::endgroup::");
-              if (status.ExitCode != 0)
+              if (status is { ExitCode: not 0 })
               {
                   Console.WriteLine($"::error::{name} exited with {status.ExitCode}");
                   return status.ExitCode;
@@ -213,7 +220,7 @@ jobs:
 
           // BenchmarkDotNet exits zero on a validation error, so the exported reports are the evidence it ran.
           string[] reports = Directory.Exists(root) ? Directory.GetFiles(root, "*-report-github.md", SearchOption.AllDirectories) : [];
-          if (reports.Length == 0)
+          if (reports is [])
           {
               Console.WriteLine("::error::No benchmark reports were produced. Check the validation errors above.");
               return 1;
@@ -226,7 +233,7 @@ jobs:
               .Select(report => $"{report.Name} ({report.Rows} rows)")
               .ToArray();
 
-          if (unmeasured.Length > 0)
+          if (unmeasured is not [])
           {
               Console.WriteLine($"::error::These benchmarks measured nothing: {string.Join("; ", unmeasured)}");
               return 1;
@@ -246,8 +253,13 @@ jobs:
           cd "$RUNNER_TEMP" && dotnet run - -- "$FILTER" "$BUDGET_KB" "$ARTIFACT_NAME" <<'CS'
           using static System.Environment;
 
-          string filter = args[0], artifactName = args[2];
-          var budget = long.Parse(args[1]) * 1024;
+          if (args is not [var filter, var budgetKb, var artifactName])
+          {
+              Console.WriteLine("::error::Expected the filter, summary budget and artifact name arguments.");
+              return;
+          }
+
+          var budget = long.Parse(budgetKb) * 1024;
 
           var summary = GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!;
           var root = Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "benchmark-artifacts");
@@ -270,7 +282,7 @@ jobs:
               ]);
 
           string[] reports = Directory.Exists(root) ? [.. Directory.GetFiles(root, "*-report-github.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal)] : [];
-          if (reports.Length == 0)
+          if (reports is [])
           {
               File.AppendAllLines(summary, ["No benchmark reports were exported."]);
               return;
@@ -289,7 +301,7 @@ jobs:
               File.AppendAllLines(summary, [$"<details><summary>{title}</summary>", "", .. File.ReadLines(report), "", "</details>", ""]);
           }
 
-          if (skipped.Count > 0)
+          if (skipped is not [])
           {
               File.AppendAllLines(summary, ["", $"Omitted here to stay inside the summary limit: {string.Join(", ", skipped)}. Read them in the {artifactName} artifact.", ""]);
           }

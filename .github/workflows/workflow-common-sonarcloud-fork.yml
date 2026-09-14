@@ -148,13 +148,11 @@ jobs:
       # Composite actions cannot declare secret inputs, so the sonarcloud action reads this from env.
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
-      - name: Validate SonarCloud token
-        run: |
-          if [ -z "${SONAR_TOKEN:-}" ]; then
-            echo "::error::SONAR_TOKEN secret is required"
-            exit 1
-          fi
-        shell: bash
+      - name: Setup .NET SDK
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          stamp-version: 'false'
 
       - name: Download PR metadata
         uses: actions/download-artifact@v8
@@ -171,25 +169,35 @@ jobs:
           # Fork-controlled: read through env, never interpolated into the script.
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          set -euo pipefail
-          meta="${RUNNER_TEMP}/pr-meta"
-          number=$(cat "${meta}/number")
-          base=$(cat "${meta}/base")
+          cd "$RUNNER_TEMP" && dotnet run - -- "$HEAD_BRANCH" <<'CS'
+          using System.Text.RegularExpressions;
+          using static System.Environment;
 
-          # Numeric only: it is interpolated into the checkout ref and the scanner command line.
-          case "$number" in
-            ''|*[!0-9]*) echo "::error::PR number artifact is not numeric: '$number'"; exit 1 ;;
-          esac
-
-          # The scanner command line is unquoted, so fork-controlled names are cut down to a safe ref charset.
-          sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9._/-'; }
-          branch_safe=$(sanitize "$HEAD_BRANCH")
-          base_safe=$(sanitize "$base")
-
+          if (args is not [var headBranch])
           {
-            echo "number=${number}"
-            echo "args=/d:sonar.pullrequest.key=${number} /d:sonar.pullrequest.branch=${branch_safe} /d:sonar.pullrequest.base=${base_safe}"
-          } >> "$GITHUB_OUTPUT"
+              Console.WriteLine("::error::Expected the head branch argument.");
+              return 2;
+          }
+
+          var metadata = Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "pr-meta");
+          string number = File.ReadAllText(Path.Combine(metadata, "number")).Trim(), baseBranch = File.ReadAllText(Path.Combine(metadata, "base")).Trim();
+
+          // Numeric only: it is interpolated into the checkout ref and the scanner command line.
+          if (number is [] || !number.All(char.IsAsciiDigit))
+          {
+              Console.WriteLine($"::error::PR number artifact is not numeric: '{number}'");
+              return 1;
+          }
+
+          File.AppendAllLines(
+              GetEnvironmentVariable("GITHUB_OUTPUT")!,
+              [$"number={number}", $"args=/d:sonar.pullrequest.key={number} /d:sonar.pullrequest.branch={Sanitize(headBranch)} /d:sonar.pullrequest.base={Sanitize(baseBranch)}"]);
+
+          return 0;
+
+          // The sonarcloud action splits extra begin args on spaces, so fork-controlled names are cut down to a safe ref charset.
+          static string Sanitize(string name) => Regex.Replace(name, "[^A-Za-z0-9._/-]", string.Empty);
+          CS
 
       - name: Checkout PR head
         uses: actions/checkout@v7

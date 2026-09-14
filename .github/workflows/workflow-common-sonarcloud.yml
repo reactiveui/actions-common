@@ -153,14 +153,6 @@ jobs:
       # Composite actions cannot declare secret inputs, so the sonarcloud action reads this from env.
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
-      - name: Validate SonarCloud token
-        run: |
-          if [ -z "${SONAR_TOKEN:-}" ]; then
-            echo "::error::SONAR_TOKEN secret is required"
-            exit 1
-          fi
-        shell: bash
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -206,32 +198,55 @@ jobs:
       # provide. Without it they run no tests and add no coverage.
       - name: Install Windows App Runtime
         if: inputs.installWindowsAppRuntime == true
-        shell: pwsh
+        shell: bash
         env:
           WINDOWS_APP_RUNTIME_VERSION: ${{ inputs.windowsAppRuntimeVersion }}
         run: |
-          $version = $env:WINDOWS_APP_RUNTIME_VERSION
-          if ($version -notmatch '^\d+\.\d+$') {
-            throw "windowsAppRuntimeVersion must be <major>.<minor>, got '$version'."
+          cd "$RUNNER_TEMP" && dotnet run - -- "$WINDOWS_APP_RUNTIME_VERSION" <<'CS'
+          #:property TargetFramework=net11.0-windows10.0.19041.0
+
+          using System.Diagnostics;
+          using System.Text.RegularExpressions;
+          using Windows.Management.Deployment;
+          using static System.Environment;
+
+          if (args is not [var version] || !Regex.IsMatch(version, @"^\d+\.\d+$"))
+          {
+              Console.WriteLine($"::error::windowsAppRuntimeVersion must be <major>.<minor>, got '{string.Join(' ', args)}'.");
+              return 1;
           }
 
-          $url = "https://aka.ms/windowsappsdk/$version/latest/windowsappruntimeinstall-x64.exe"
-          $exe = Join-Path $env:RUNNER_TEMP 'windowsappruntimeinstall-x64.exe'
-          Write-Host "Downloading Windows App Runtime $version"
-          Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
-
-          $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru -NoNewWindow
-          # 0x80073D06 (-2147009274): a newer runtime is already installed.
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne -2147009274) {
-            throw "Windows App Runtime install failed with exit code $($p.ExitCode)."
+          var installer = Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "windowsappruntimeinstall-x64.exe");
+          Console.WriteLine($"Downloading Windows App Runtime {version}");
+          using (var http = new HttpClient())
+          {
+              await File.WriteAllBytesAsync(installer, await http.GetByteArrayAsync($"https://aka.ms/windowsappsdk/{version}/latest/windowsappruntimeinstall-x64.exe"));
           }
 
-          $names = @(Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime*' | Select-Object -ExpandProperty Name -Unique)
-          if ($names.Count -eq 0) {
-            throw 'Windows App Runtime install reported success but no runtime package is registered.'
+          // 0x80073D06: a newer runtime is already installed.
+          if (Process.Run(installer, ["--quiet"]) is { ExitCode: not (0 or unchecked((int)0x80073D06)) } install)
+          {
+              Console.WriteLine($"::error::Windows App Runtime install failed with exit code {install.ExitCode}.");
+              return 1;
           }
 
-          Write-Host "Registered runtimes: $($names -join ', ')"
+          string[] runtimes =
+          [
+              .. new PackageManager().FindPackagesForUser(string.Empty)
+                  .Select(package => package.Id.Name)
+                  .Where(name => name.StartsWith("Microsoft.WindowsAppRuntime", StringComparison.Ordinal))
+                  .Distinct(),
+          ];
+
+          if (runtimes is [])
+          {
+              Console.WriteLine("::error::Windows App Runtime install reported success but no runtime package is registered.");
+              return 1;
+          }
+
+          Console.WriteLine($"Registered runtimes: {string.Join(", ", runtimes)}");
+          return 0;
+          CS
 
       - name: Test
         if: inputs.performTests == true

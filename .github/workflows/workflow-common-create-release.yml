@@ -41,8 +41,10 @@ jobs:
           name: ${{ inputs.artifactName }}
           path: ./signed
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v6
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
 
       - name: Install GitReleaseNoteGenerator
         run: dotnet tool install -g GitReleaseNoteGenerator
@@ -63,15 +65,20 @@ jobs:
           TITLE: ${{ inputs.version }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
-          set -euo pipefail
-          PRERELEASE_FLAG=()
-          if [ "$PRERELEASE" = "true" ]; then
-            PRERELEASE_FLAG=(--prerelease)
-          fi
-          gh release create "$TAG" \
-            --repo "$REPO" \
-            --target "$TARGET" \
-            --title "$TITLE" \
-            --notes-file release-notes.md \
-            "${PRERELEASE_FLAG[@]}" \
-            ./signed/*.nupkg
+          cd "$RUNNER_TEMP" && dotnet run - -- "$REPO" "$TAG" "$TARGET" "$TITLE" "$PRERELEASE" <<'CS'
+          using System.Diagnostics;
+          using static System.Environment;
+
+          if (args is not [var repository, var tag, var target, var title, var prerelease])
+          {
+              Console.WriteLine("::error::Expected the repository, tag, target, title and pre-release arguments.");
+              return 2;
+          }
+
+          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+
+          string[] flags = prerelease is "true" ? ["--prerelease"] : [];
+          return Process.Run(
+              "gh",
+              ["release", "create", tag, "--repo", repository, "--target", target, "--title", title, "--notes-file", "release-notes.md", .. flags, .. Directory.GetFiles("signed", "*.nupkg")]).ExitCode;
+          CS

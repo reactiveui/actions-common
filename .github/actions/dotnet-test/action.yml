@@ -26,27 +26,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Resolve solution file for MTP test runner
-      id: resolve-solution
-      shell: bash
-      working-directory: ${{ inputs.src-folder }}
-      run: |
-        if [ ! -f "testconfig.json" ]; then
-          echo "::error::MTP requires '${{ inputs.src-folder }}/testconfig.json' (manages coverage and execution). See https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
-          exit 1
-        fi
-
-        if [ -n "${{ inputs.solution-file }}" ]; then
-          echo "solution-arg=--solution ${{ inputs.solution-file }}" >> $GITHUB_OUTPUT
-        else
-          SLN_FILE=$(find . -maxdepth 1 \( -name "*.sln" -o -name "*.slnx" \) | head -n 1)
-          if [ -n "$SLN_FILE" ]; then
-            echo "solution-arg=--solution $SLN_FILE" >> $GITHUB_OUTPUT
-          else
-            echo "solution-arg=" >> $GITHUB_OUTPUT
-          fi
-        fi
-
     - name: Expose GitHub Actions runtime for TUnit HTML report upload
       uses: actions/github-script@v9
       with:
@@ -56,27 +35,50 @@ runs:
 
     - name: Run tests with Microsoft Testing Platform and native coverage
       shell: bash
-      working-directory: ${{ inputs.src-folder }}
+      env:
+        SRC_FOLDER: ${{ inputs.src-folder }}
+        SOLUTION_FILE: ${{ inputs.solution-file }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        DETAILED_LOGGING: ${{ inputs.enable-detailed-test-logging }}
+        TEST_TIMEOUT: ${{ inputs.test-timeout }}
       run: |
-        DIAG_ARGS=""
-        if [ "${{ inputs.enable-detailed-test-logging }}" == "true" ]; then
-          # --verbosity is VSTest-only and ignored by MTP. Synchronous writes keep the log when the runner kills a hung test.
-          DIAG_ARGS="--diagnostic --diagnostic-verbosity Trace --diagnostic-synchronous-write --log-level Trace --output Detailed"
-        fi
-        TIMEOUT_ARGS=""
-        if [ -n "${{ inputs.test-timeout }}" ]; then
-          TIMEOUT_ARGS="--timeout ${{ inputs.test-timeout }}"
-        fi
+        cd "$RUNNER_TEMP" && dotnet run - -- "$SRC_FOLDER" "$SOLUTION_FILE" "$CONFIGURATION" "$DETAILED_LOGGING" "$TEST_TIMEOUT" <<'CS'
+        using System.Diagnostics;
+        using static System.Environment;
 
-        # No --results-directory: parallel test hosts sharing one directory collide on log_<ts>.diag names.
-        # shellcheck disable=SC2086
-        dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
-          --no-build \
-          --configuration ${{ inputs.configuration }} \
-          $DIAG_ARGS \
-          $TIMEOUT_ARGS \
-          --coverage \
-          --coverage-output-format cobertura
+        if (args is not [var srcFolder, var solutionFile, var configuration, var detailedLogging, var testTimeout])
+        {
+            Console.WriteLine("::error::Expected the source folder, solution file, configuration, detailed logging and test timeout arguments.");
+            return 2;
+        }
+
+        Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, srcFolder));
+
+        if (!File.Exists("testconfig.json"))
+        {
+            Console.WriteLine($"::error::MTP requires '{srcFolder}/testconfig.json' (manages coverage and execution). See https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage");
+            return 1;
+        }
+
+        string[] solution = (solutionFile, Directory.EnumerateFiles(".", "*.slnx").Concat(Directory.EnumerateFiles(".", "*.sln")).FirstOrDefault()) switch
+        {
+            (not "", _) => ["--solution", solutionFile],
+            (_, { } found) => ["--solution", found],
+            _ => [],
+        };
+
+        // --verbosity is VSTest-only and ignored by MTP. Synchronous writes keep the log when the runner kills a hung test.
+        string[] diagnostics = detailedLogging is "true"
+            ? ["--diagnostic", "--diagnostic-verbosity", "Trace", "--diagnostic-synchronous-write", "--log-level", "Trace", "--output", "Detailed"]
+            : [];
+
+        string[] timeout = testTimeout is "" ? [] : ["--timeout", testTimeout];
+
+        // No --results-directory: parallel test hosts sharing one directory collide on log_<ts>.diag names.
+        return Process.Run(
+            "dotnet",
+            ["test", .. solution, "--no-build", "--configuration", configuration, .. diagnostics, .. timeout, "--coverage", "--coverage-output-format", "cobertura"]).ExitCode;
+        CS
 
     - name: Upload per-OS coverage reports as build artifacts
       uses: actions/upload-artifact@v7

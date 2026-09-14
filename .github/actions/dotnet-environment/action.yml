@@ -25,6 +25,10 @@ inputs:
     description: 'Run dotnet workload restore'
     required: false
     default: 'false'
+  stamp-version:
+    description: 'Stamp the version with MinVer. Set false for a job with no checkout, or one that stamps the version itself later.'
+    required: false
+    default: 'true'
   minver-tag-prefix:
     description: 'Tag prefix for MinVer (default v).'
     required: false
@@ -128,11 +132,15 @@ runs:
         using System.Diagnostics;
         using static System.Environment;
 
-        string srcFolder = args[0], solutionFile = args[1];
+        if (args is not [var srcFolder, var solutionFile])
+        {
+            Console.WriteLine("::error::Expected the source folder and solution file arguments.");
+            return 2;
+        }
 
         Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, srcFolder));
 
-        IEnumerable<string> solution = solutionFile.Length > 0
+        IEnumerable<string> solution = solutionFile is not ""
             ? [solutionFile]
             : Directory.EnumerateFiles(".", "*.slnx").Concat(Directory.EnumerateFiles(".", "*.sln")).Take(1);
 
@@ -141,6 +149,7 @@ runs:
 
     - name: Stamp version with MinVer
       id: minver
+      if: inputs.stamp-version == 'true'
       uses: reactiveui/actions-common/.github/actions/minver@main
       with:
         tag-prefix: ${{ inputs.minver-tag-prefix }}
