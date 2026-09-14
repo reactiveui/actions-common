@@ -77,12 +77,14 @@ RUN curl -fsSL -o /tmp/dotnet-install.sh https://dot.net/v1/dotnet-install.sh \
 # hardcodes /opt/SimplySignDesktop/SimplySignDesktop, so the dist MUST live there
 # (mirrors hpvb/certum-container). Extract to a temp dir, then move the dist into
 # place and drop the installer + temp to keep the layer smaller.
+# The installer kills every process whose command line names SimplySignDesktop, so this step names it only through $SS_DIST.
+ENV SS_DIST=/opt/SimplySignDesktop
 RUN curl -fsSL -o /tmp/ss.bin "$SIMPLYSIGN_BIN_URL" \
     && mkdir -p /tmp/ss-extract \
     && (yes yes | sh /tmp/ss.bin --target /tmp/ss-extract || true) \
-    && mv "$(find /tmp/ss-extract -maxdepth 1 -type d -name 'SSD-*-dist' | head -1)" /opt/SimplySignDesktop \
+    && mv "$(find /tmp/ss-extract -maxdepth 1 -type d -name 'SSD-*-dist' | head -1)" "$SS_DIST" \
     && rm -rf /tmp/ss.bin /tmp/ss-extract \
-    && test -x /opt/SimplySignDesktop/SimplySignDesktop
+    && test -x "$SS_DIST/SimplySignDesktop"
 
 COPY --from=xml /opt/xml/lib/libxml2.so.2* /opt/xml/lib/libxslt.so.1* /opt/SimplySignDesktop/
 
@@ -126,7 +128,6 @@ RUN curl -fsSL -o /opt/jsign.jar "https://repo1.maven.org/maven2/net/jsign/jsign
 # bake a default in — without it the login window never appears.
 ENV CERTUM_PREBUILT=1 \
     USER=root \
-    SS_DIST=/opt/SimplySignDesktop \
     JSIGN_JAR=/opt/jsign.jar \
     LD_LIBRARY_PATH=/opt/SimplySignDesktop
 
