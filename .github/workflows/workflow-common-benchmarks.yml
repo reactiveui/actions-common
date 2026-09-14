@@ -15,6 +15,11 @@ on:
         required: true
         description: 'Newline-separated list of benchmark projects (.csproj) to run, relative to srcFolder. Blank lines are skipped, so a caller can build the list from a suite choice.'
 
+      ref:
+        type: string
+        default: ''
+        description: 'Commit to check out and measure. Empty measures the commit that triggered the run.'
+
       filter:
         type: string
         default: '*'
@@ -109,6 +114,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
 
       - name: Setup .NET Environment
@@ -127,168 +133,154 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
 
-      - name: Run benchmarks (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        working-directory: ${{ inputs.srcFolder }}
-        env:
-          PROJECTS: ${{ inputs.projects }}
-          FILTER: ${{ inputs.filter }}
-          CONFIGURATION: ${{ inputs.configuration }}
-          HOST_FRAMEWORK: ${{ inputs.hostFramework }}
-          EXPORTERS: ${{ inputs.exporters }}
-          BUILD_OUTPUT_PATH: ${{ inputs.buildOutputPath }}
-          RAISE_PRIORITY: ${{ inputs.raisePriority }}
+      - name: Run benchmarks
+        shell: bash
         run: |
-          $output = if ($env:BUILD_OUTPUT_PATH) { $env:BUILD_OUTPUT_PATH } else { 'C:\a' }
+          cd "$RUNNER_TEMP" && dotnet run - -- "${{ inputs.projects }}" "${{ inputs.srcFolder }}" "${{ inputs.filter }}" "${{ inputs.configuration }}" "${{ inputs.hostFramework }}" "${{ inputs.exporters }}" "${{ inputs.buildOutputPath }}" "${{ inputs.raisePriority }}" <<'CS'
+          using System.Diagnostics;
+          using static System.Environment;
 
-          foreach ($project in ($env:PROJECTS -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
-              $name = [System.IO.Path]::GetFileNameWithoutExtension($project)
-              Write-Host "::group::$name"
+          string projects = args[0], srcFolder = args[1], filter = args[2], configuration = args[3], hostFramework = args[4], exporters = args[5], buildOutputPath = args[6], raisePriority = args[7];
 
-              $arguments = @(
-                  'run', '--project', $project, '-c', $env:CONFIGURATION, '-f', $env:HOST_FRAMEWORK,
-                  '--artifacts-path', $output, '--',
-                  '--filter', $env:FILTER,
-                  '--artifacts', "$env:GITHUB_WORKSPACE/benchmark-artifacts/$name",
-                  '--exporters'
-              ) + ($env:EXPORTERS -split ' ' | Where-Object { $_ })
+          var workspace = GetEnvironmentVariable("GITHUB_WORKSPACE")!;
 
-              # Started detached to raise priority on the handle; BenchmarkDotNet's per-job child processes inherit it.
-              $run = Start-Process -FilePath 'dotnet' -ArgumentList $arguments -NoNewWindow -PassThru
-              if ($env:RAISE_PRIORITY -eq 'true') {
-                  try { $run.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High }
-                  catch { Write-Host "::warning::Could not raise the benchmark priority: $($_.Exception.Message)" }
-              }
+          // An empty build output path picks a drive root on Windows, where the NativeAOT build otherwise passes 260 characters.
+          string[] artifactsPath = buildOutputPath.Length > 0 ? ["--artifacts-path", buildOutputPath]
+              : OperatingSystem.IsWindows() ? ["--artifacts-path", @"C:\a"]
+              : [];
 
-              $run.WaitForExit()
-              if ($run.ExitCode -ne 0) { throw "$name exited with $($run.ExitCode)" }
-
-              Write-Host '::endgroup::'
+          if (raisePriority == "true")
+          {
+              RaisePriority();
           }
 
-      - name: Run benchmarks (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        working-directory: ${{ inputs.srcFolder }}
-        env:
-          PROJECTS: ${{ inputs.projects }}
-          FILTER: ${{ inputs.filter }}
-          CONFIGURATION: ${{ inputs.configuration }}
-          HOST_FRAMEWORK: ${{ inputs.hostFramework }}
-          EXPORTERS: ${{ inputs.exporters }}
-          BUILD_OUTPUT_PATH: ${{ inputs.buildOutputPath }}
-          RAISE_PRIORITY: ${{ inputs.raisePriority }}
-        run: |
-          # RLIMIT_NICE caps the nice value: `ulimit -e` of 40 permits -20, the usual 0 permits nothing.
-          # Renicing the shell covers BenchmarkDotNet's child processes. Best-effort.
-          if [ "$RAISE_PRIORITY" = 'true' ]; then
-            ceiling=$(ulimit -e 2>/dev/null || echo 0)
-            target=$((20 - ceiling))
+          Directory.SetCurrentDirectory(Path.Combine(workspace, srcFolder));
 
-            if [ "$target" -lt 0 ]; then
-              renice -n "$target" -p $$ > /dev/null 2>&1 \
-                && echo "Benchmarks renice to $target, permitted by RLIMIT_NICE." \
-                || echo "::warning::RLIMIT_NICE permits $target but renice refused it."
-            elif sudo -n true 2>/dev/null; then
-              sudo renice -n -20 -p $$ > /dev/null 2>&1 \
-                && echo 'Benchmarks renice to -20 through sudo.' \
-                || echo '::warning::Could not raise the benchmark priority through sudo.'
-            else
-              echo "::warning::RLIMIT_NICE permits no better than $target and sudo is unavailable, so the benchmarks run at the default priority."
-            fi
-          fi
+          foreach (var project in projects.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+          {
+              var name = Path.GetFileNameWithoutExtension(project);
+              Console.WriteLine($"::group::{name}");
 
-          while IFS= read -r project; do
-            project="$(echo "$project" | tr -d '[:space:]')"
-            [ -n "$project" ] || continue
+              var status = Process.Run(
+                  "dotnet",
+                  [
+                      "run", "--project", project, "-c", configuration, "-f", hostFramework, .. artifactsPath, "--",
+                      "--filter", filter, "--artifacts", Path.Combine(workspace, "benchmark-artifacts", name),
+                      "--exporters", .. exporters.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+                  ]);
 
-            name="$(basename "$project" .csproj)"
-            echo "::group::$name"
+              Console.WriteLine("::endgroup::");
+              if (status.ExitCode != 0)
+              {
+                  Console.WriteLine($"::error::{name} exited with {status.ExitCode}");
+                  return status.ExitCode;
+              }
+          }
 
-            arguments=(run --project "$project" -c "$CONFIGURATION" -f "$HOST_FRAMEWORK")
-            if [ -n "$BUILD_OUTPUT_PATH" ]; then
-              arguments+=(--artifacts-path "$BUILD_OUTPUT_PATH")
-            fi
-            arguments+=(-- --filter "$FILTER" --artifacts "$GITHUB_WORKSPACE/benchmark-artifacts/$name" --exporters)
-            # shellcheck disable=SC2206
-            arguments+=($EXPORTERS)
+          return 0;
 
-            dotnet "${arguments[@]}"
-
-            echo '::endgroup::'
-          done <<< "$PROJECTS"
+          // Processes started from here inherit the priority on Unix; on Windows BenchmarkDotNet raises its own benchmark processes.
+          static void RaisePriority()
+          {
+              try
+              {
+                  using var current = Process.GetCurrentProcess();
+                  current.PriorityClass = ProcessPriorityClass.High;
+              }
+              catch (Exception ex)
+              {
+                  Console.WriteLine($"::warning::Could not raise the benchmark priority: {ex.Message}");
+              }
+          }
+          CS
 
       - name: Validate benchmark reports
-        shell: pwsh
+        shell: bash
         run: |
-          # BenchmarkDotNet exits zero on a validation error, so the exported reports are the evidence it ran.
-          $produced = Get-ChildItem -Path "$env:GITHUB_WORKSPACE/benchmark-artifacts" -Recurse -Filter '*-report-github.md' -ErrorAction SilentlyContinue
-          if ($produced.Count -eq 0) { throw 'No benchmark reports were produced. Check the validation errors above.' }
+          cd "$RUNNER_TEMP" && dotnet run - <<'CS'
+          using static System.Environment;
 
-          # A job whose build fails still exports its rows, with every measurement as NA.
-          $unmeasured = foreach ($report in $produced) {
-              $rows = @(Get-Content -Path $report.FullName | Where-Object { $_ -match '^\|' -and $_ -match '\|\s*NA\s*\|' })
-              if ($rows.Count -gt 0) { '{0} ({1} rows)' -f ($report.Name -replace '-report-github\.md$', ''), $rows.Count }
+          var root = Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "benchmark-artifacts");
+
+          // BenchmarkDotNet exits zero on a validation error, so the exported reports are the evidence it ran.
+          string[] reports = Directory.Exists(root) ? Directory.GetFiles(root, "*-report-github.md", SearchOption.AllDirectories) : [];
+          if (reports.Length == 0)
+          {
+              Console.WriteLine("::error::No benchmark reports were produced. Check the validation errors above.");
+              return 1;
           }
-          if ($unmeasured) { throw "These benchmarks measured nothing: $($unmeasured -join '; ')" }
+
+          // A job whose build fails still exports its rows, with every measurement as NA.
+          var unmeasured = reports
+              .Select(report => (Name: Path.GetFileName(report).Replace("-report-github.md", string.Empty), Rows: File.ReadLines(report).Count(line => line.StartsWith('|') && line.Split('|').Any(cell => cell.Trim() == "NA"))))
+              .Where(report => report.Rows > 0)
+              .Select(report => $"{report.Name} ({report.Rows} rows)")
+              .ToArray();
+
+          if (unmeasured.Length > 0)
+          {
+              Console.WriteLine($"::error::These benchmarks measured nothing: {string.Join("; ", unmeasured)}");
+              return 1;
+          }
+
+          return 0;
+          CS
 
       - name: Publish results to run summary
         if: always()
-        shell: pwsh
-        env:
-          FILTER: ${{ inputs.filter }}
-          BUDGET_KB: ${{ inputs.summaryBudgetKb }}
-          ARTIFACT_NAME: ${{ inputs.artifactName }}
+        shell: bash
         run: |
-          $summary = $env:GITHUB_STEP_SUMMARY
-          $root = "$env:GITHUB_WORKSPACE/benchmark-artifacts"
-          $budget = [int]$env:BUDGET_KB * 1KB
+          cd "$RUNNER_TEMP" && dotnet run - -- "${{ inputs.filter }}" "${{ inputs.summaryBudgetKb }}" "${{ inputs.artifactName }}" <<'CS'
+          using static System.Environment;
 
-          Add-Content -Path $summary -Value @(
-              '# Benchmark results',
-              '',
-              "Filter ``$env:FILTER``, commit ``$env:GITHUB_SHA``, measured on ``$env:RUNNER_OS``.",
-              '',
-              'Each section is one benchmark class. The runtimes measured are whichever jobs that class',
-              'declares, so a class with no NativeAOT row cannot run ahead-of-time at all. A hosted runner',
-              'is shared, so read these for trend and regression rather than as absolute figures.',
-              "Full JSON, HTML and CSV exports are attached to this run as ``$env:ARTIFACT_NAME``.",
-              ''
-          )
+          string filter = args[0], artifactName = args[2];
+          var budget = long.Parse(args[1]) * 1024;
 
-          if (-not (Test-Path $root)) {
-              Add-Content -Path $summary -Value 'No benchmark artifacts were produced.'
-              exit 0
+          var summary = GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!;
+          var root = Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "benchmark-artifacts");
+
+          // With a ref input the triggering commit is not the measured one, so the checked-out commit MinVer read comes first.
+          var commit = GetEnvironmentVariable("MINVER_GitCommitId") ?? GetEnvironmentVariable("GITHUB_SHA");
+
+          File.AppendAllLines(
+              summary,
+              [
+                  "# Benchmark results",
+                  "",
+                  $"Filter `{filter}`, commit `{commit}`, measured on `{GetEnvironmentVariable("RUNNER_OS")}`.",
+                  "",
+                  "Each section is one benchmark class. The runtimes measured are whichever jobs that class",
+                  "declares, so a class with no NativeAOT row cannot run ahead-of-time at all. A hosted runner",
+                  "is shared, so read these for trend and regression rather than as absolute figures.",
+                  $"Full JSON, HTML and CSV exports are attached to this run as `{artifactName}`.",
+                  "",
+              ]);
+
+          string[] reports = Directory.Exists(root) ? [.. Directory.GetFiles(root, "*-report-github.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal)] : [];
+          if (reports.Length == 0)
+          {
+              File.AppendAllLines(summary, ["No benchmark reports were exported."]);
+              return;
           }
 
-          $reports = Get-ChildItem -Path $root -Recurse -Filter '*-report-github.md' | Sort-Object FullName
-          if ($reports.Count -eq 0) {
-              Add-Content -Path $summary -Value 'No GitHub-markdown reports were exported.'
-              exit 0
-          }
-
-          $skipped = @()
-          foreach ($report in $reports) {
-              $title = $report.Name -replace '-report-github\.md$', ''
-
-              if ((Get-Item $summary).Length + $report.Length -gt $budget) {
-                  $skipped += $title
-                  continue
+          List<string> skipped = [];
+          foreach (var report in reports)
+          {
+              var title = Path.GetFileName(report).Replace("-report-github.md", string.Empty);
+              if (new FileInfo(summary).Length + new FileInfo(report).Length > budget)
+              {
+                  skipped.Add(title);
+                  continue;
               }
 
-              Add-Content -Path $summary -Value @("<details><summary>$title</summary>", '')
-              Get-Content -Path $report.FullName | Add-Content -Path $summary
-              Add-Content -Path $summary -Value @('', '</details>', '')
+              File.AppendAllLines(summary, [$"<details><summary>{title}</summary>", "", .. File.ReadLines(report), "", "</details>", ""]);
           }
 
-          if ($skipped.Count -gt 0) {
-              Add-Content -Path $summary -Value @(
-                  '',
-                  "Omitted here to stay inside the summary limit: $($skipped -join ', '). Read them in the $env:ARTIFACT_NAME artifact.",
-                  ''
-              )
+          if (skipped.Count > 0)
+          {
+              File.AppendAllLines(summary, ["", $"Omitted here to stay inside the summary limit: {string.Join(", ", skipped)}. Read them in the {artifactName} artifact.", ""]);
           }
+          CS
 
       - name: Upload benchmark reports
         if: always()

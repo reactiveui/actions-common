@@ -1,0 +1,85 @@
+name: .NET Benchmarks
+description: Check out a commit and run BenchmarkDotNet projects, writing their reports to a results folder.
+
+inputs:
+  ref:
+    description: 'Commit to check out. Empty uses the commit that triggered the run.'
+    required: false
+    default: ''
+  projects:
+    description: 'Newline-separated benchmark projects (.csproj), relative to src.'
+    required: true
+  results-folder:
+    description: 'Absolute folder the reports are written to, one subfolder per project.'
+    required: true
+  solution-file:
+    description: 'Solution the workload restore reads, relative to src.'
+    required: false
+    default: ''
+  install-workloads:
+    description: 'Run workload restore.'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ inputs.ref }}
+        fetch-depth: 0
+
+    - name: Setup .NET Environment
+      uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+      with:
+        solution-file: ${{ inputs.solution-file }}
+        install-workloads: ${{ inputs.install-workloads }}
+
+    - name: Run benchmarks
+      shell: bash
+      run: |
+        cd "$RUNNER_TEMP" && dotnet run - -- "${{ inputs.projects }}" "${{ inputs.results-folder }}" <<'CS'
+        using System.Diagnostics;
+        using static System.Environment;
+
+        string projects = args[0], results = args[1];
+
+        // A short build path on Windows keeps the NativeAOT build under 260 characters.
+        var output = OperatingSystem.IsWindows() ? @"C:\a" : Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "a");
+
+        RaisePriority();
+        Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "src"));
+
+        foreach (var project in projects.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var name = Path.GetFileNameWithoutExtension(project);
+            var status = Process.Run(
+                "dotnet",
+                [
+                    "run", "--project", project, "-c", "Release", "-f", "net10.0", "--artifacts-path", output, "--",
+                    "--filter", "*", "--artifacts", Path.Combine(results, name), "--exporters", "github", "fulljson",
+                ]);
+
+            if (status.ExitCode != 0)
+            {
+                return status.ExitCode;
+            }
+        }
+
+        return 0;
+
+        // Processes started from here inherit the priority on Unix; on Windows BenchmarkDotNet raises its own benchmark processes.
+        static void RaisePriority()
+        {
+            try
+            {
+                using var current = Process.GetCurrentProcess();
+                current.PriorityClass = ProcessPriorityClass.High;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"::warning::Could not raise the benchmark priority: {ex.Message}");
+            }
+        }
+        CS

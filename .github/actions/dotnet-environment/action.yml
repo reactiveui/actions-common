@@ -7,7 +7,12 @@ description: |
 inputs:
   dotnet-versions:
     description: 'Newline-separated list of .NET SDK versions'
-    required: true
+    required: false
+    default: |
+      8.0.x
+      9.0.x
+      10.0.x
+      11.0.x
   src-folder:
     description: 'Folder containing the solution'
     required: false
@@ -52,48 +57,84 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Configure .NET CLI environment
-      shell: bash
-      run: |
-        {
-          echo "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"
-          echo "DOTNET_NOLOGO=1"
-          echo "DOTNET_CLI_TELEMETRY_OPTOUT=1"
-        } >> "$GITHUB_ENV"
-
     - name: Setup .NET SDK
       uses: actions/setup-dotnet@v6
       with:
         dotnet-version: ${{ inputs.dotnet-versions }}
 
+    - name: Configure .NET CLI environment
+      shell: bash
+      run: |
+        cd "$RUNNER_TEMP" && dotnet run - <<'CS'
+        using static System.Environment;
+
+        File.AppendAllLines(GetEnvironmentVariable("GITHUB_ENV")!, ["DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1", "DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"]);
+        CS
+
     - name: Configure Windows Defender exclusions
       if: runner.os == 'Windows'
-      shell: pwsh
+      shell: bash
       run: |
-        # Real-time scanning of build output is a large share of Windows build time. Best-effort.
-        $paths = @($env:GITHUB_WORKSPACE, $env:DOTNET_ROOT, $env:RUNNER_TEMP, (Join-Path $env:USERPROFILE '.nuget')) | Where-Object { $_ }
-        foreach ($p in $paths) {
-          try { Add-MpPreference -ExclusionPath $p -ErrorAction Stop; Write-Host "Defender exclusion: $p" }
-          catch { Write-Host "Skipped Defender exclusion for $p ($($_.Exception.Message))" }
+        cd "$RUNNER_TEMP" && dotnet run - <<'CS'
+        #:package System.Management@*
+        #:property PublishAot=false
+
+        using System.Management;
+        using System.Runtime.Versioning;
+        using static System.Environment;
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
         }
-        foreach ($proc in 'dotnet.exe', 'MSBuild.exe', 'VBCSCompiler.exe') {
-          try { Add-MpPreference -ExclusionProcess $proc -ErrorAction Stop } catch { }
+
+        // Real-time scanning of build output is a large share of Windows build time. Best-effort.
+        AddExclusions(
+            "ExclusionPath",
+            [
+                GetEnvironmentVariable("GITHUB_WORKSPACE")!,
+                GetEnvironmentVariable("DOTNET_ROOT")!,
+                GetEnvironmentVariable("RUNNER_TEMP")!,
+                Path.Combine(GetFolderPath(SpecialFolder.UserProfile), ".nuget"),
+            ]);
+        AddExclusions("ExclusionProcess", ["dotnet.exe", "MSBuild.exe", "VBCSCompiler.exe"]);
+
+        [SupportedOSPlatform("windows")]
+        static void AddExclusions(string preference, string[] values)
+        {
+            try
+            {
+                using var preferences = new ManagementClass(@"root\Microsoft\Windows\Defender", "MSFT_MpPreference", null);
+                using var parameters = preferences.GetMethodParameters("Add");
+                parameters[preference] = values;
+                preferences.InvokeMethod("Add", parameters, null);
+                Console.WriteLine($"Defender {preference}: {string.Join(", ", values)}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Skipped Defender {preference} ({ex.Message})");
+            }
         }
+        CS
 
     - name: Restore .NET Workloads
       if: inputs.install-workloads == 'true'
       shell: bash
-      working-directory: ${{ inputs.src-folder }}
       run: |
-        TARGET="${{ inputs.solution-file }}"
-        if [ -z "$TARGET" ]; then
-          TARGET=$(find . -maxdepth 1 \( -name '*.slnx' -o -name '*.sln' \) -print -quit)
-        fi
-        if [ -n "$TARGET" ]; then
-          dotnet workload restore "$TARGET" --from-previous-sdk --skip-manifest-update
-        else
-          dotnet workload restore --from-previous-sdk --skip-manifest-update
-        fi
+        cd "$RUNNER_TEMP" && dotnet run - -- "${{ inputs.src-folder }}" "${{ inputs.solution-file }}" <<'CS'
+        using System.Diagnostics;
+        using static System.Environment;
+
+        string srcFolder = args[0], solutionFile = args[1];
+
+        Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, srcFolder));
+
+        IEnumerable<string> solution = solutionFile.Length > 0
+            ? [solutionFile]
+            : Directory.EnumerateFiles(".", "*.slnx").Concat(Directory.EnumerateFiles(".", "*.sln")).Take(1);
+
+        return Process.Run("dotnet", ["workload", "restore", .. solution, "--from-previous-sdk", "--skip-manifest-update"]).ExitCode;
+        CS
 
     - name: Stamp version with MinVer
       id: minver

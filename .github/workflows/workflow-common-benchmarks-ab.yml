@@ -1,0 +1,151 @@
+name: Common A/B benchmarks workflow
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        required: true
+        description: 'Baseline commit.'
+
+      head:
+        type: string
+        required: true
+        description: 'Commit compared against the baseline.'
+
+      projects:
+        type: string
+        required: true
+        description: 'Newline-separated benchmark projects (.csproj), relative to src.'
+
+      solutionFile:
+        type: string
+        default: ''
+        description: 'Solution the workload restore reads, relative to src.'
+
+      installWorkloads:
+        type: boolean
+        default: false
+        description: 'Run workload restore.'
+
+jobs:
+  benchmark:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    env:
+      BENCHMARK_PROFILERS: false
+
+    steps:
+      - name: Benchmark base
+        uses: reactiveui/actions-common/.github/actions/dotnet-benchmarks@main
+        with:
+          ref: ${{ inputs.base }}
+          projects: ${{ inputs.projects }}
+          results-folder: ${{ runner.temp }}/benchmark-ab/base
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+
+      - name: Benchmark head
+        uses: reactiveui/actions-common/.github/actions/dotnet-benchmarks@main
+        with:
+          ref: ${{ inputs.head }}
+          projects: ${{ inputs.projects }}
+          results-folder: ${{ runner.temp }}/benchmark-ab/head
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+
+      - name: Compare base and head
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "${{ runner.temp }}/benchmark-ab/base" "${{ runner.temp }}/benchmark-ab/head" <<'CS'
+          using System.Globalization;
+          using System.Text.Json;
+          using System.Text.RegularExpressions;
+          using static System.Environment;
+
+          // A benchmark is faster or slower only when the 99.9% confidence intervals of its two means do not overlap.
+          var baseResults = Load(args[0]);
+          var headResults = Load(args[1]);
+
+          using var summary = File.AppendText(GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!);
+          summary.WriteLine("# A/B benchmark results");
+          summary.WriteLine();
+          summary.WriteLine("| Benchmark | Base | Head | Head/Base | Result |");
+          summary.WriteLine("|---|---:|---:|---:|---|");
+
+          foreach (var key in baseResults.Keys.Union(headResults.Keys).Order(StringComparer.Ordinal))
+          {
+              var hasBase = baseResults.TryGetValue(key, out var before);
+              var hasHead = headResults.TryGetValue(key, out var after);
+
+              if (!hasBase || !hasHead)
+              {
+                  summary.WriteLine($"| {key} | {(hasBase ? Format(before) : "-")} | {(hasHead ? Format(after) : "-")} | - | {(hasBase ? "base only" : "head only")} |");
+                  continue;
+              }
+
+              var result = after.Lower > before.Upper ? "slower" : after.Upper < before.Lower ? "faster" : "unresolved";
+              var ratio = (after.Mean / before.Mean).ToString("0.000", CultureInfo.InvariantCulture);
+              summary.WriteLine($"| {key} | {Format(before)} | {Format(after)} | {ratio} | {result} |");
+          }
+
+          static Dictionary<string, Measurement> Load(string folder)
+          {
+              var results = new Dictionary<string, Measurement>(StringComparer.Ordinal);
+
+              foreach (var path in Directory.EnumerateFiles(folder, "*full.json", SearchOption.AllDirectories))
+              {
+                  using var document = JsonDocument.Parse(File.ReadAllText(path));
+
+                  foreach (var benchmark in document.RootElement.GetProperty("Benchmarks").EnumerateArray())
+                  {
+                      if (!benchmark.TryGetProperty("Statistics", out var statistics) || statistics.ValueKind != JsonValueKind.Object)
+                      {
+                          continue;
+                      }
+
+                      var interval = statistics.GetProperty("ConfidenceInterval");
+                      results[Key(benchmark)] = new(
+                          statistics.GetProperty("Mean").GetDouble(),
+                          interval.GetProperty("Lower").GetDouble(),
+                          interval.GetProperty("Upper").GetDouble());
+                  }
+              }
+
+              return results;
+          }
+
+          // BenchmarkDotNet generates job ids that differ between runs, so a benchmark is keyed by its name and job characteristics.
+          static string Key(JsonElement benchmark)
+          {
+              var characteristics = Regex.Match(benchmark.GetProperty("DisplayInfo").GetString() ?? string.Empty, @"\(([^()]*)\)\s*$");
+              return $"{benchmark.GetProperty("FullName").GetString()} ({characteristics.Groups[1].Value})";
+          }
+
+          static string Format(Measurement measurement)
+          {
+              var (scale, unit) = measurement.Mean switch
+              {
+                  >= 1_000_000_000 => (1_000_000_000d, "s"),
+                  >= 1_000_000 => (1_000_000d, "ms"),
+                  >= 1_000 => (1_000d, "us"),
+                  _ => (1d, "ns"),
+              };
+
+              var margin = (measurement.Upper - measurement.Mean) / scale;
+              return string.Create(CultureInfo.InvariantCulture, $"{measurement.Mean / scale:0.00} ± {margin:0.00} {unit}");
+          }
+
+          internal readonly record struct Measurement(double Mean, double Lower, double Upper);
+          CS
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-ab
+          path: ${{ runner.temp }}/benchmark-ab
