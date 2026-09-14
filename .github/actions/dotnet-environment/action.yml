@@ -1,6 +1,6 @@
 name: .NET Environment Setup
 description: |
-  Setup .NET SDK with caching, optional workloads, and version stamping with
+  Setup .NET SDK, optional workloads, and version stamping with
   MinVer. Version is computed from the latest reachable v-prefixed tag (or the
   minver-minimum-major-minor floor when none is reachable).
 
@@ -20,10 +20,6 @@ inputs:
     description: 'Run dotnet workload restore'
     required: false
     default: 'false'
-  cache-nuget:
-    description: 'Cache NuGet packages and feed responses between runs on Linux/macOS (Windows never caches). Set false where the job would compete with the build for the same cache entries.'
-    required: false
-    default: 'true'
   minver-tag-prefix:
     description: 'Tag prefix for MinVer (default v).'
     required: false
@@ -58,11 +54,10 @@ runs:
   steps:
     - name: Configure .NET CLI environment
       shell: bash
-      # Quiet/telemetry hygiene only. The SDK stays where setup-dotnet puts it and
-      # workloads are never cached: GitHub caches are branch-scoped, so a multi-GB
-      # workload cache is duplicated per branch/PR and blows the 10 GB OSS budget.
-      # Windows never caches NuGet either: compressing the package folder takes
-      # longer than a cold restore. cache-nuget turns the Linux/macOS caches off.
+      # Quiet/telemetry hygiene only. Nothing is cached between runs: GitHub caches
+      # are branch-scoped, so multi-GB workload and NuGet caches are duplicated per
+      # branch/PR, outgrow the 10 GB OSS budget and are evicted before a run reads
+      # them back.
       run: |
         {
           echo "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"
@@ -70,16 +65,10 @@ runs:
           echo "DOTNET_CLI_TELEMETRY_OPTOUT=1"
         } >> "$GITHUB_ENV"
 
-    - name: Setup .NET SDK with NuGet package cache
+    - name: Setup .NET SDK
       uses: actions/setup-dotnet@v6
       with:
         dotnet-version: ${{ inputs.dotnet-versions }}
-        cache: ${{ runner.os != 'Windows' && inputs.cache-nuget == 'true' }}
-        cache-dependency-path: |
-          **/Directory.Packages.props
-          **/*.csproj
-          **/global.json
-          **/nuget.config
 
     - name: Configure Windows Defender exclusions
       if: runner.os == 'Windows'
@@ -96,15 +85,6 @@ runs:
         foreach ($proc in 'dotnet.exe', 'MSBuild.exe', 'VBCSCompiler.exe') {
           try { Add-MpPreference -ExclusionProcess $proc -ErrorAction Stop } catch { }
         }
-
-    - name: Cache NuGet HTTP v3 feed responses (Unix)
-      if: runner.os != 'Windows' && inputs.cache-nuget == 'true'
-      uses: actions/cache@v6
-      with:
-        path: ~/.local/share/NuGet/v3-cache
-        key: ${{ runner.os }}-nugetv3-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj', '**/global.json', '**/nuget.config') }}
-        restore-keys: |
-          ${{ runner.os }}-nugetv3-
 
     - name: Restore .NET Workloads
       if: inputs.install-workloads == 'true'

@@ -235,7 +235,6 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
           install-workloads: ${{ inputs.installWorkloads }}
-          cache-nuget: 'false'
           minver-tag-prefix: ${{ inputs.minverTagPrefix }}
           minver-minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
           minver-auto-increment: ${{ inputs.minverAutoIncrement }}
