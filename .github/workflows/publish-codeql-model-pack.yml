@@ -1,6 +1,6 @@
 name: Publish CodeQL model pack
 
-# `codeql pack publish` refuses to overwrite a version: bump `version:` in qlpack.yml with every model change.
+# The patch version is the number of commits that touched the pack, so every model change publishes a new version.
 # The metadata must live in qlpack.yml; the CLI ignores `extensionTargets` in codeql-pack.yml.
 # The package must be public: consuming repositories' GITHUB_TOKEN cannot read a private package.
 on:
@@ -25,6 +25,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
 
       - name: Install the CodeQL CLI
         run: |
@@ -32,8 +39,70 @@ jobs:
           gh extension install github/gh-codeql
           gh codeql set-version latest
 
+      - name: Stamp pack version
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$PACK_DIR" <<'CS'
+          using System.Diagnostics;
+          using static System.Environment;
+
+          if (args is not [var packDir])
+          {
+              Console.WriteLine("::error::Expected the pack directory argument.");
+              return 2;
+          }
+
+          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+
+          var qlpack = Path.Combine(packDir, "qlpack.yml");
+          var lines = File.ReadAllLines(qlpack);
+          if (Array.FindIndex(lines, line => line.StartsWith("version:", StringComparison.Ordinal)) is not (>= 0 and var index)
+              || lines[index]["version:".Length..].Trim().Split('.') is not [var major, var minor, _])
+          {
+              Console.WriteLine($"::error::{qlpack} needs a top-level major.minor.patch version.");
+              return 1;
+          }
+
+          if (Process.RunAndCaptureText("git", ["rev-list", "--count", "HEAD", "--", packDir]) is not { ExitStatus.ExitCode: 0, StandardOutput: var commits })
+          {
+              Console.WriteLine("::error::Could not count the commits that touched the pack.");
+              return 1;
+          }
+
+          lines[index] = $"version: {major}.{minor}.{commits.Trim()}";
+          File.WriteAllLines(qlpack, lines);
+          Console.WriteLine($"Publishing {lines[index]}");
+          return 0;
+          CS
+
       - name: Resolve pack dependencies
         run: gh codeql pack install "$PACK_DIR"
 
       - name: Publish pack
-        run: gh codeql pack publish "$PACK_DIR"
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$PACK_DIR" <<'CS'
+          using System.Diagnostics;
+          using static System.Environment;
+
+          if (args is not [var packDir])
+          {
+              Console.WriteLine("::error::Expected the pack directory argument.");
+              return 2;
+          }
+
+          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+
+          var publish = Process.RunAndCaptureText("gh", ["codeql", "pack", "publish", packDir]);
+          Console.Write(publish.StandardOutput);
+          Console.Error.Write(publish.StandardError);
+
+          // A re-run of an already-published commit carries the same version.
+          if (publish is { ExitStatus.ExitCode: not 0 } && (publish.StandardOutput + publish.StandardError).Contains("already exists", StringComparison.Ordinal))
+          {
+              Console.WriteLine("::notice::This pack version is already published.");
+              return 0;
+          }
+
+          return publish.ExitStatus.ExitCode;
+          CS
