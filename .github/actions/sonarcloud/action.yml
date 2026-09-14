@@ -69,13 +69,13 @@ runs:
           exit 1
         fi
 
-    - name: Set up JDK 21 (SonarScanner prerequisite)
+    - name: Set up JDK 25 (SonarScanner prerequisite)
       # skipJreProvisioning runs the scanner on this JDK instead of downloading a JRE.
       if: inputs.mode == 'begin'
       uses: actions/setup-java@v6
       with:
         distribution: temurin
-        java-version: '21'
+        java-version: '25'
 
     - name: Install (or update) dotnet-sonarscanner global tool
       if: inputs.mode == 'begin'
