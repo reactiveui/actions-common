@@ -77,14 +77,16 @@ RUN curl -fsSL -o /tmp/dotnet-install.sh https://dot.net/v1/dotnet-install.sh \
 # hardcodes /opt/SimplySignDesktop/SimplySignDesktop, so the dist MUST live there
 # (mirrors hpvb/certum-container). Extract to a temp dir, then move the dist into
 # place and drop the installer + temp to keep the layer smaller.
-# The installer kills every process whose command line names SimplySignDesktop, so this step names it only through $SS_DIST.
+# The installer kills every process whose command line names SimplySignDesktop, so the install step never names it
+# and the binary is checked in the next step.
 ENV SS_DIST=/opt/SimplySignDesktop
 RUN curl -fsSL -o /tmp/ss.bin "$SIMPLYSIGN_BIN_URL" \
     && mkdir -p /tmp/ss-extract \
     && (yes yes | sh /tmp/ss.bin --target /tmp/ss-extract || true) \
     && mv "$(find /tmp/ss-extract -maxdepth 1 -type d -name 'SSD-*-dist' | head -1)" "$SS_DIST" \
-    && rm -rf /tmp/ss.bin /tmp/ss-extract \
-    && test -x "$SS_DIST/SimplySignDesktop"
+    && rm -rf /tmp/ss.bin /tmp/ss-extract
+
+RUN test -x "$SS_DIST/SimplySignDesktop"
 
 COPY --from=xml /opt/xml/lib/libxml2.so.2* /opt/xml/lib/libxslt.so.1* /opt/SimplySignDesktop/
 
