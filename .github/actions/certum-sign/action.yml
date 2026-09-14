@@ -38,9 +38,6 @@ runs:
       shell: bash
       run: |
         set -euxo pipefail
-        # In the prebuilt image SimplySign lives at $SS_DIST and jsign at
-        # $JSIGN_JAR (set via Dockerfile ENV). Derive the exe/wrapper/PKCS#11
-        # paths and export them for the connect + sign steps.
         : "${SS_DIST:?prebuilt image must set SS_DIST}"
         {
           echo "SS_DIST=$SS_DIST"
@@ -55,8 +52,7 @@ runs:
         set -euxo pipefail
         Xvfb :99 -screen 0 1280x1024x24 >"$RUNNER_TEMP/xvfb.log" 2>&1 &
         sleep 3
-        # Stop fluxbox running fbsetbg (missing default wallpaper -> an xmessage
-        # that steals focus from the login form).
+        # Without a rootCommand fluxbox runs fbsetbg, whose missing-wallpaper xmessage steals focus from the login form.
         mkdir -p "$HOME/.fluxbox"
         printf 'session.screen0.rootCommand: /bin/true\n' > "$HOME/.fluxbox/init"
         DISPLAY=:99 fluxbox >"$RUNNER_TEMP/fluxbox.log" 2>&1 &
@@ -72,14 +68,10 @@ runs:
         : "${CERTUM_USER_ID:?map the CERTUM_USER_ID secret into the job env}"
         : "${CERTUM_OTP_URI:?map the CERTUM_OTP_URI secret into the job env}"
 
-        # SimplySignDesktop reads $USER at startup and segfaults (NULL deref in
-        # its bundled OpenSSL) when it is unset. Containers don't set $USER (the
-        # GitHub VM runner does), so default it here or the login window never
-        # appears — the process crashes before drawing it.
+        # SimplySignDesktop segfaults before drawing the login window when $USER is unset, as it is in containers.
         export USER="${USER:-root}"
 
-        # SimplySign needs its config near $HOME + the logon-dialog preference,
-        # otherwise it shows a "Critical error" on launch.
+        # Without its config in $HOME and the logon-dialog preference, SimplySign shows a "Critical error" on launch.
         cp "$SS_DIST/SimplySignDesktop.xml" "$HOME/" 2>/dev/null || true
         mkdir -p "$HOME/.config"
         { echo "[General]"; echo "CacheUserIdAtLogon=Yes"; echo "ShowLogonDialogAfterApplicationStartup=Yes"; echo "ShowLogonDialogWhenAnyAppRequestsAccess=Yes"; } > "$HOME/.config/Unknown Organization.conf"
@@ -105,9 +97,7 @@ runs:
         )"
         echo "::add-mask::$OTP"
 
-        # Find the login form: enumerate windows, match getwindowname (_NET_WM_NAME);
-        # `search --name PATTERN` matches the empty legacy WM_NAME for this app.
-        # Retry-wait because the dialog can lag the launch.
+        # Match on getwindowname (_NET_WM_NAME): `search --name PATTERN` only sees this app's empty WM_NAME.
         WID=""; BX=0; BY=0; BW=0; BH=0
         for attempt in $(seq 1 30); do
           best=0; WID=""
@@ -134,8 +124,7 @@ runs:
         xdotool mousemove $((BX + BW/2)) $((BY + BH*76/100)) click 1
         sleep 8
 
-        # "Logon successful" dialog: the token does NOT activate until its Close
-        # button (bottom-centre) is clicked. Re-find the window (content changed).
+        # The token only activates once the "Logon successful" dialog's Close button (bottom-centre) is clicked.
         best=0
         for w in $(xdotool search --name '' 2>/dev/null); do
           nm="$(xdotool getwindowname "$w" 2>/dev/null || true)"
@@ -149,14 +138,8 @@ runs:
 
         sleep 3
 
-        # Confirm the token is active (this also fails fast if login didn't take): the module
-        # enumerates the slot only once the cloud session is up.
-        #
-        # It says nothing about whether the token's objects are populated, and nothing here can.
-        # A bare pkcs11-tool session sees only what the token exposes publicly, which is not the
-        # view the provider jsign loads gets - this token lists no certificate object there even
-        # when signing works. Waiting on that listing waits forever; the wait belongs on the
-        # signing call, which is the only thing that sees the keystore jsign sees.
+        # The slot only enumerates once the cloud session is up, so this fails fast on a bad login.
+        # It cannot show the certificate: this token lists none to pkcs11-tool even when signing works.
         timeout 60 pkcs11-tool --module "$SS_PKCS11" -L
 
     - name: Sign packages with jsign + verify
@@ -166,7 +149,6 @@ runs:
         PKG_GLOB: ${{ inputs.packages-glob }}
       run: |
         set -euxo pipefail
-        # jsign is baked into the prebuilt signer image ($JSIGN_JAR).
         : "${JSIGN_JAR:?prebuilt image must set JSIGN_JAR}"
         JAR="$JSIGN_JAR"
         CONF="$RUNNER_TEMP/sunpkcs11.conf"
@@ -178,11 +160,8 @@ runs:
 
         for pkg in "${pkgs[@]}"; do
           echo "::group::sign $pkg"
-          # The token enumerates before its objects are populated, so the keystore can still
-          # report no certificate for a few seconds after login - which hits the first package
-          # and, left alone, fails roughly one run in ten. Retry that one message and let every
-          # other failure through on the first attempt; the token has one key, so jsign
-          # auto-selects it. RFC3161 timestamp so the signature outlives the cert.
+          # The keystore can report no certificate for a few seconds after login, so only that error is retried.
+          # jsign auto-selects the token's single key; the RFC3161 timestamp outlives the certificate.
           signed=0
           for attempt in $(seq 1 15); do
             if out="$(java -jar "$JAR" --storetype PKCS11 --keystore "$CONF" --storepass "" \

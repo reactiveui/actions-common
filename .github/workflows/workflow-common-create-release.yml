@@ -32,9 +32,6 @@ on:
         description: 'Mark the GitHub release as a pre-release (adds --prerelease). Pass workflow-common-release''s prerelease output so beta/rc cuts are flagged as pre-releases and not surfaced as "Latest".'
 
 jobs:
-  # ============================
-  # CREATE GITHUB RELEASE (Linux)
-  # ============================
   create-release:
     runs-on: ubuntu-latest
     steps:
@@ -55,9 +52,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: git-release-notes --release-version "${{ inputs.version }}" --output-file release-notes.md
 
-      # Creates the tag too: workflow-common-release.yml no longer pushes it up
-      # front (so a failed build/sign/publish leaves no orphan tag). --target pins
-      # the new tag to the exact commit this run built.
+      # Also creates the tag, pinned by --target to the commit the release job built.
       - name: Create GitHub Release
         shell: bash
         env:
@@ -69,8 +64,6 @@ jobs:
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
-          # Flag beta/rc cuts as pre-releases so GitHub keeps the latest stable
-          # tagged "Latest" rather than promoting a pre-release over it.
           PRERELEASE_FLAG=()
           if [ "$PRERELEASE" = "true" ]; then
             PRERELEASE_FLAG=(--prerelease)

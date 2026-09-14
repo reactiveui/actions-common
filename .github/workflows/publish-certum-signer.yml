@@ -1,9 +1,5 @@
 name: Publish Certum signer image
 
-# Builds the prebuilt Certum SimplySign signing image and pushes it to GHCR.
-# The release sign job pulls this instead of installing SimplySign + the X/Qt
-# stack + jsign on every run. Run manually, or automatically when the Dockerfile
-# (or this workflow) changes on main.
 on:
   workflow_dispatch:
   push:

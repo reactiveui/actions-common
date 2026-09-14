@@ -31,8 +31,6 @@ runs:
       shell: bash
       working-directory: ${{ inputs.src-folder }}
       run: |
-        # MTP requires a testconfig.json alongside the solution to manage
-        # coverage and execution. Fail with a clear message if it is missing.
         if [ ! -f "testconfig.json" ]; then
           echo "::error::MTP requires '${{ inputs.src-folder }}/testconfig.json' (manages coverage and execution). See https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-extensions-code-coverage"
           exit 1
@@ -62,10 +60,7 @@ runs:
       run: |
         DIAG_ARGS=""
         if [ "${{ inputs.enable-detailed-test-logging }}" == "true" ]; then
-          # MTP diagnostic logging — note --verbosity is a VSTest flag and is
-          # silently ignored by MTP, so we use the real MTP flags here.
-          # Sync file writes are critical: async logs are lost if a hanging
-          # test gets killed by the CI runner.
+          # --verbosity is VSTest-only and ignored by MTP. Synchronous writes keep the log when the runner kills a hung test.
           DIAG_ARGS="--diagnostic --diagnostic-verbosity Trace --diagnostic-synchronous-write --log-level Trace --output Detailed"
         fi
         TIMEOUT_ARGS=""
@@ -73,9 +68,7 @@ runs:
           TIMEOUT_ARGS="--timeout ${{ inputs.test-timeout }}"
         fi
 
-        # No --results-directory: MTP's per-app default keeps each TFM's diag
-        # log in its own dir, avoiding a flaky log_<ts>.diag filename collision
-        # across parallel test hosts. Globs below still collect coverage/.diag.
+        # No --results-directory: parallel test hosts sharing one directory collide on log_<ts>.diag names.
         # shellcheck disable=SC2086
         dotnet test ${{ steps.resolve-solution.outputs.solution-arg }} \
           --no-build \
@@ -96,9 +89,6 @@ runs:
         if-no-files-found: warn
         retention-days: 3
 
-    # Always upload MTP diagnostic logs (when produced) so hangs/crashes are
-    # debuggable. if: always() ensures the upload runs even if the test step
-    # failed or was killed.
     - name: Upload MTP diagnostic logs
       if: always() && inputs.enable-detailed-test-logging == 'true'
       uses: actions/upload-artifact@v7

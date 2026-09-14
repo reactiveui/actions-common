@@ -54,10 +54,6 @@ runs:
   steps:
     - name: Configure .NET CLI environment
       shell: bash
-      # Quiet/telemetry hygiene only. Nothing is cached between runs: GitHub caches
-      # are branch-scoped, so multi-GB workload and NuGet caches are duplicated per
-      # branch/PR, outgrow the 10 GB OSS budget and are evicted before a run reads
-      # them back.
       run: |
         {
           echo "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"
@@ -74,9 +70,7 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
-        # Real-time scanning of every compiled assembly and obj file is a large
-        # share of the Windows build/test penalty. Exclude the build trees and
-        # the dotnet/NuGet caches for this runner session (best-effort).
+        # Real-time scanning of build output is a large share of Windows build time. Best-effort.
         $paths = @($env:GITHUB_WORKSPACE, $env:DOTNET_ROOT, $env:RUNNER_TEMP, (Join-Path $env:USERPROFILE '.nuget')) | Where-Object { $_ }
         foreach ($p in $paths) {
           try { Add-MpPreference -ExclusionPath $p -ErrorAction Stop; Write-Host "Defender exclusion: $p" }
@@ -91,8 +85,6 @@ runs:
       shell: bash
       working-directory: ${{ inputs.src-folder }}
       run: |
-        # Determine the solution/project file to pass to workload restore.
-        # If explicitly provided use that, otherwise auto-detect .slnx/.sln in the working directory.
         TARGET="${{ inputs.solution-file }}"
         if [ -z "$TARGET" ]; then
           TARGET=$(find . -maxdepth 1 \( -name '*.slnx' -o -name '*.sln' \) -print -quit)

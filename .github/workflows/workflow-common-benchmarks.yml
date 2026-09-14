@@ -102,9 +102,7 @@ jobs:
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
 
-      # The build server is of no use to a job that builds each project once, and every attempt to
-      # reach it waits out a connect timeout before falling back in-process. Leaving it off also keeps
-      # a server process from lingering to compete with what is being measured.
+      # Every build-server connect attempt waits out a timeout, and a lingering server competes with the measurement.
       DOTNET_CLI_USE_MSBUILD_SERVER: 0
 
     steps:
@@ -134,8 +132,6 @@ jobs:
         shell: pwsh
         working-directory: ${{ inputs.srcFolder }}
         env:
-          # Taken through the environment rather than interpolated into the command, so an input
-          # cannot extend it.
           PROJECTS: ${{ inputs.projects }}
           FILTER: ${{ inputs.filter }}
           CONFIGURATION: ${{ inputs.configuration }}
@@ -158,8 +154,7 @@ jobs:
                   '--exporters'
               ) + ($env:EXPORTERS -split ' ' | Where-Object { $_ })
 
-              # Started detached so the priority can be raised on the handle; a child process inherits
-              # its parent's priority class, so the process BenchmarkDotNet spawns per job gets it too.
+              # Started detached to raise priority on the handle; BenchmarkDotNet's per-job child processes inherit it.
               $run = Start-Process -FilePath 'dotnet' -ArgumentList $arguments -NoNewWindow -PassThru
               if ($env:RAISE_PRIORITY -eq 'true') {
                   try { $run.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::High }
@@ -185,11 +180,8 @@ jobs:
           BUILD_OUTPUT_PATH: ${{ inputs.buildOutputPath }}
           RAISE_PRIORITY: ${{ inputs.raisePriority }}
         run: |
-          # Lowering a nice value needs the right to do it, and what a process may ask for is capped by
-          # RLIMIT_NICE: `ulimit -e` reports the ceiling, where 40 permits -20 and the usual 0 permits
-          # nothing at all. Renicing the shell is the way in, because children inherit the value, so it
-          # covers the processes BenchmarkDotNet spawns per job. Every route is best-effort: a run at the
-          # default priority is worth having, a failed run is not.
+          # RLIMIT_NICE caps the nice value: `ulimit -e` of 40 permits -20, the usual 0 permits nothing.
+          # Renicing the shell covers BenchmarkDotNet's child processes. Best-effort.
           if [ "$RAISE_PRIORITY" = 'true' ]; then
             ceiling=$(ulimit -e 2>/dev/null || echo 0)
             target=$((20 - ceiling))
@@ -219,7 +211,6 @@ jobs:
               arguments+=(--artifacts-path "$BUILD_OUTPUT_PATH")
             fi
             arguments+=(-- --filter "$FILTER" --artifacts "$GITHUB_WORKSPACE/benchmark-artifacts/$name" --exporters)
-            # Word splitting is what turns the space-separated list into separate arguments.
             # shellcheck disable=SC2206
             arguments+=($EXPORTERS)
 
@@ -231,13 +222,11 @@ jobs:
       - name: Validate benchmark reports
         shell: pwsh
         run: |
-          # BenchmarkDotNet reports a validation error and exits zero, so a run that measured nothing
-          # looks identical to a clean one. The exported reports are the evidence it ran.
+          # BenchmarkDotNet exits zero on a validation error, so the exported reports are the evidence it ran.
           $produced = Get-ChildItem -Path "$env:GITHUB_WORKSPACE/benchmark-artifacts" -Recurse -Filter '*-report-github.md' -ErrorAction SilentlyContinue
           if ($produced.Count -eq 0) { throw 'No benchmark reports were produced. Check the validation errors above.' }
 
-          # A job whose build fails still exports its rows, with every measurement written as NA.
-          # Reading the tables is the only way to tell that apart from a run that measured.
+          # A job whose build fails still exports its rows, with every measurement as NA.
           $unmeasured = foreach ($report in $produced) {
               $rows = @(Get-Content -Path $report.FullName | Where-Object { $_ -match '^\|' -and $_ -match '\|\s*NA\s*\|' })
               if ($rows.Count -gt 0) { '{0} ({1} rows)' -f ($report.Name -replace '-report-github\.md$', ''), $rows.Count }
@@ -288,8 +277,6 @@ jobs:
                   continue
               }
 
-              # BenchmarkDotNet's own exporter produces the table; collapsing each class keeps the page
-              # scannable when a whole suite has run.
               Add-Content -Path $summary -Value @("<details><summary>$title</summary>", '')
               Get-Content -Path $report.FullName | Add-Content -Path $summary
               Add-Content -Path $summary -Value @('', '</details>', '')

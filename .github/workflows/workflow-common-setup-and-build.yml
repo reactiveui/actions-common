@@ -2,7 +2,7 @@ name: Common .NET setup and build workflow
 
 permissions:
   contents: read
-  actions: write   # needed for the optional cleanup step at the end
+  actions: write   # deletes the per-OS coverage artifacts
 
 concurrency:
   group: common-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
@@ -119,9 +119,6 @@ on:
         description: 'Token for uploading coverage reports to Codecov'
 
 jobs:
-  # ============================
-  # WINDOWS (parallel)
-  # ============================
   build-windows:
     runs-on: windows-latest
     env:
@@ -164,10 +161,8 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
 
-      # An unpackaged WinUI test host resolves the Windows App SDK framework package through the bootstrapper
-      # at start-up. That package is a machine-level MSIX framework, not an SDK workload, so `dotnet workload
-      # restore` does not provide it and the hosted image does not ship it: without this the WinUI assemblies
-      # run zero tests and exit with the bootstrapper HRESULT (0x80670016) instead of a test result.
+      # WinUI test hosts need the Windows App SDK runtime, an MSIX framework package neither workloads nor the image
+      # provide. Without it they run no tests and exit with 0x80670016.
       - name: Install Windows App Runtime
         if: inputs.installWindowsAppRuntime == true
         shell: pwsh
@@ -185,7 +180,7 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $exe -UseBasicParsing
 
           $p = Start-Process -FilePath $exe -ArgumentList '--quiet' -Wait -PassThru -NoNewWindow
-          # 0 succeeded; 0x80073D06 (-2147009274) means a newer runtime is already present, which is fine.
+          # 0x80073D06 (-2147009274): a newer runtime is already installed.
           if ($p.ExitCode -ne 0 -and $p.ExitCode -ne -2147009274) {
             throw "Windows App Runtime install failed with exit code $($p.ExitCode)."
           }
@@ -207,9 +202,6 @@ jobs:
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
           test-timeout: ${{ inputs.testTimeout }}
 
-  # ============================
-  # LINUX & MACOS (parallel matrix)
-  # ============================
   build-unix:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -255,9 +247,6 @@ jobs:
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
           test-timeout: ${{ inputs.testTimeout }}
 
-  # ============================
-  # COLLECTOR (waits for all) — uploads once + Codecov
-  # ============================
   collect-coverage:
     needs:
       - build-windows
@@ -290,7 +279,6 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         run: |
           pip install codecov-cli
-          # Collect all cobertura files and upload in a single command
           FILES=$(find ./.collect -name '*.cobertura.xml' -type f | sed 's/^/--file /' | tr '\n' ' ')
           codecov-cli upload-coverage $FILES
 

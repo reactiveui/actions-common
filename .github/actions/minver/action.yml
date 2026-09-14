@@ -60,14 +60,11 @@ runs:
   using: composite
   steps:
     - name: Install (or update) minver-cli global tool
-      # Skip the tool install on the override path — no git walk happens, so the
-      # CLI is never invoked.
       if: inputs.version-override == ''
       shell: bash
       run: |
         echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
-        # `tool update` installs if missing and upgrades if present, so we always
-        # end up on the latest published minver-cli regardless of what the runner ships.
+        # `tool update` installs when missing and upgrades otherwise.
         dotnet tool update --global minver-cli
 
     - name: Compute MinVer version and export MINVER_* + GITHUB_OUTPUT
@@ -82,9 +79,6 @@ runs:
         VERSION_OVERRIDE: ${{ inputs.version-override }}
       run: |
         if [ -n "$VERSION_OVERRIDE" ]; then
-          # Out-of-sequence / backport release: take the version verbatim and
-          # skip the MinVer git walk. Everything below derives from SEMVER2, so
-          # all outputs (and MINVERVERSIONOVERRIDE for MSBuild) stay consistent.
           SEMVER2="$VERSION_OVERRIDE"
           echo "Version override supplied; skipping MinVer git walk. Using: $SEMVER2"
         else
@@ -101,13 +95,13 @@ runs:
         fi
 
         # Derive the rest by parsing SEMVER2: "<major>.<minor>.<patch>[-<pre>][+<meta>]"
-        VERSION_CORE="${SEMVER2%%[-+]*}"          # strip pre-release / metadata
+        VERSION_CORE="${SEMVER2%%[-+]*}"
         IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_CORE"
         REMAINDER="${SEMVER2#$VERSION_CORE}"
         PRE_RELEASE=""
         BUILD_META=""
         case "$REMAINDER" in
-          -*)   # "-pre+meta" or just "-pre"
+          -*)
             REST="${REMAINDER#-}"
             PRE_RELEASE="${REST%%+*}"
             case "$REST" in *+*) BUILD_META="${REST#*+}";; esac
@@ -120,9 +114,7 @@ runs:
         ASSEMBLY_VERSION="${MAJOR}.0.0.0"
         ASSEMBLY_FILE_VERSION="${MAJOR}.${MINOR}.${PATCH}.0"
 
-        # NuGet 3+ accepts SemVer2 including pre-release; we still strip +meta
-        # because most package feeds reject build metadata and the NBGV action
-        # exposed a metadata-free flavor under this name.
+        # Package feeds reject build metadata, so the NuGet version drops it.
         if [ -n "$PRE_RELEASE" ]; then
           NUGET_PACKAGE_VERSION="${VERSION_CORE}-${PRE_RELEASE}"
         else
@@ -139,7 +131,6 @@ runs:
           VERSION_HEIGHT=$(git rev-list --count HEAD)
         fi
 
-        # Export as cloud variables (mirrors NBGV's `nbgv cloud -a` behavior)
         {
           echo "MINVER_SemVer2=${SEMVER2}"
           echo "MINVER_SimpleVersion=${VERSION_CORE}"
@@ -152,12 +143,9 @@ runs:
           echo "MINVER_VersionHeight=${VERSION_HEIGHT}"
         } >> "$GITHUB_ENV"
 
-        # Also surface to dotnet so MSBuild can pick up the version without
-        # MinVer needing to walk git on every project (and so CI overrides
-        # whatever local tag state would have produced).
+        # MinVer's MSBuild task stamps this verbatim instead of walking git per project.
         echo "MINVERVERSIONOVERRIDE=${SEMVER2}" >> "$GITHUB_ENV"
 
-        # Step outputs (same names as the nbgv action so workflows can swap.)
         {
           echo "SemVer2=${SEMVER2}"
           echo "SimpleVersion=${VERSION_CORE}"

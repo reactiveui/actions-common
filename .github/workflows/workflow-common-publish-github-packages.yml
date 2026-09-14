@@ -12,9 +12,6 @@ on:
         description: 'Name of the artifact containing .nupkg files to publish'
 
 jobs:
-  # ============================
-  # PUBLISH TO GITHUB PACKAGES
-  # ============================
   publish-github-packages:
     runs-on: ubuntu-latest
     steps:

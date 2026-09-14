@@ -79,12 +79,7 @@ runs:
             exit 1 ;;
         esac
 
-        # Latest RTM tag: <prefix>X.Y.Z, excluding any pre-release tag (those
-        # contain a hyphen) and any bare/unprefixed tags. sort -V orders by
-        # version so tail -1 is the highest.
-        # `|| true` so an empty tag list (brand-new repo) doesn't trip
-        # pipefail/set -e: grep exits 1 on no matches, which would otherwise
-        # abort before the first-release seeding below.
+        # Pre-release tags contain a hyphen. `|| true` stops grep's no-match exit aborting a repo with no tags.
         LAST="$(git tag --list "${TAG_PREFIX}[0-9]*.[0-9]*.[0-9]*" \
                 | grep -Ev -- '-' \
                 | sort -V \
@@ -92,10 +87,6 @@ runs:
                 | sed "s/^${TAG_PREFIX}//" || true)"
 
         if [ -z "$LAST" ]; then
-          # Brand-new project: no RTM tag in history yet. Seed the baseline at
-          # 0.0.0 so the requested bump produces the first release straight from
-          # the normal bump math (patch -> 0.0.1, minor -> 0.1.0, major -> 1.0.0)
-          # instead of forcing a manual first tag.
           echo "No RTM tag (${TAG_PREFIX}X.Y.Z) found in history; seeding first release from 0.0.0."
           LAST="0.0.0"
         fi
@@ -109,25 +100,19 @@ runs:
         esac
 
         if [ -n "$PRE_RELEASE_ID" ]; then
-          # SemVer 2.0 pre-release identifiers are alphanumerics and hyphens only.
-          # We forbid a dot in the id so "<core>-<id>.<N>" has exactly one dotted
-          # numeric counter to parse (e.g. beta.7, not beta.1.7).
+          # No dots, so "<core>-<id>.<N>" has exactly one numeric counter to parse.
           case "$PRE_RELEASE_ID" in
             *[!A-Za-z0-9-]*|'')
               echo "::error::pre-release-id '${PRE_RELEASE_ID}' must be a SemVer 2.0 alphanumeric/hyphen identifier (no dots)."
               exit 1 ;;
           esac
 
-          # Auto-increment the channel counter: scan existing
-          # <prefix><core>-<id>.<N> tags and take max(N)+1, starting at 1 when
-          # this is the first pre-release of this core+channel. The counter is
-          # per (core, channel), so switching beta -> rc restarts at rc.1.
           MAXN=0
           while IFS= read -r t; do
             [ -z "$t" ] && continue
-            n="${t##*.}"               # trailing segment after the last dot
+            n="${t##*.}"
             case "$n" in
-              ''|*[!0-9]*) continue ;; # ignore tags without a numeric counter
+              ''|*[!0-9]*) continue ;;
             esac
             if [ "$n" -gt "$MAXN" ]; then MAXN="$n"; fi
           done < <(git tag --list "${TAG_PREFIX}${CORE}-${PRE_RELEASE_ID}.[0-9]*")
@@ -158,8 +143,7 @@ runs:
           echo "push-tag=false: computed ${TAG} but not creating it now (deferred, e.g. to GitHub release creation)."
         fi
 
-        # Stamp every downstream MSBuild project with this exact version and skip
-        # MinVer's per-project git walk.
+        # MinVer's MSBuild task stamps this verbatim instead of walking git.
         echo "MINVERVERSIONOVERRIDE=${VERSION}" >> "$GITHUB_ENV"
 
         {

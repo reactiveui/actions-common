@@ -45,9 +45,6 @@ on:
         value: ${{ jobs.build-release.outputs.semver2 }}
 
 jobs:
-  # ============================
-  # BUILD + PACK (no signing)
-  # ============================
   build-release:
     runs-on: windows-latest
     outputs:

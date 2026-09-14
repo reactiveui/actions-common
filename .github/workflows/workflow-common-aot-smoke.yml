@@ -76,9 +76,7 @@ jobs:
       - name: Install native AOT prerequisites (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        # ILC links the native image with clang and needs zlib headers on Linux.
-        # The hosted image usually ships these; install defensively so the gate
-        # does not rot if the image drops them.
+        # ILC links with clang and zlib; the image usually has both.
         run: |
           sudo apt-get update
           sudo apt-get install -y clang zlib1g-dev

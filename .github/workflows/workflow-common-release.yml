@@ -1,8 +1,6 @@
 name: Common .NET build and release workflow
 
-# packages: read is the ceiling that lets the optional sign-container job pull
-# the (internal) prebuilt signer image. Reusable-workflow job permissions cannot
-# exceed this workflow-level set, so every caller must also grant packages: read.
+# packages: read lets the sign job pull the internal signer image; callers must grant it too.
 permissions:
   contents: write
   packages: read
@@ -121,14 +119,9 @@ on:
         description: 'SHA-256 fingerprint of the Certum code-signing certificate'
 
 jobs:
-  # ============================
-  # BUILD + PACK (configurable OS — default Windows)
-  # ============================
   build:
     environment:
       name: release
-    # Default Windows because several projects have Windows-specific build logic;
-    # callers can override with buildOs. Signing happens on Linux in the next job.
     runs-on: ${{ inputs.buildOs }}
     outputs:
       semver2: ${{ steps.environment.outputs.nbgv-semver2 }}
@@ -139,8 +132,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # Empty ref => checkout's default (the triggering ref). A branch/tag/SHA
-          # here re-releases historical source with the current signing pipeline.
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
@@ -149,10 +140,6 @@ jobs:
         shell: bash
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # bump (compute next version from the latest tag) and versionOverride (stamp
-      # an exact version) are two different ways to pick the release number; setting
-      # both is ambiguous, so fail fast. A preRelease channel rides on the bumped
-      # core, so it needs bump and is likewise incompatible with versionOverride.
       - name: Validate version inputs
         shell: bash
         env:
@@ -174,12 +161,7 @@ jobs:
             exit 1
           fi
 
-      # For a bump release: compute the next clean RTM version, push the vX.Y.Z
-      # tag, and export MINVERVERSIONOVERRIDE so the MinVer step below stamps it.
-      # Skipped (no-op) for normal CI builds where bump is empty.
-      # Compute the version + export MINVERVERSIONOVERRIDE for build/pack, but DON'T
-      # create the tag yet — the tag is pushed by create-release at the end, so a
-      # failed build/sign/publish never leaves an orphan tag.
+      # workflow-common-create-release creates the tag, so a failed build or sign leaves no orphan tag.
       - name: Compute version and tag
         if: inputs.bump != '' && inputs.versionOverride == ''
         id: bump
@@ -190,9 +172,7 @@ jobs:
           pre-release-id: ${{ inputs.preRelease }}
           push-tag: 'false'
 
-      # Resolve the tag the GitHub release will create at the end. The override
-      # path forms <prefix><versionOverride> and fails fast if it already exists
-      # (the bump path does its own existence check inside compute-version-and-tag).
+      # compute-version-and-tag rejects an existing bump tag; an existing override tag is rejected here.
       - name: Resolve release tag
         id: tagname
         shell: bash
@@ -209,7 +189,6 @@ jobs:
               echo "::error::Tag ${TAG} already exists. Refusing to re-release an existing version."
               exit 1
             fi
-            # A SemVer 2.0 pre-release is anything carrying a hyphenated suffix.
             case "$VERSION_OVERRIDE" in *-*) PRERELEASE=true ;; *) PRERELEASE=false ;; esac
             {
               echo "tag=${TAG}"
@@ -265,32 +244,22 @@ jobs:
           path: packages/*.nupkg
           if-no-files-found: error
 
-  # ============================
-  # SIGN with Certum SimplySign — runs inside the prebuilt signer container
-  # (SimplySign + jsign + .NET baked in). This is the only signing path; the
-  # caller must grant packages:read so the job's GITHUB_TOKEN can pull the
-  # (internal) image.
-  # ============================
   sign:
     needs: build
-    # The workflow-level permissions (contents: write) would otherwise strip
-    # packages:read from this job's token, so the GHCR image pull gets denied.
-    # Override here (still capped by what the caller granted).
+    # Without this the job token lacks packages: read and the GHCR image pull is denied.
     permissions:
       contents: read
       packages: read
     environment:
       name: release
-    # Certum SimplySign is GUI middleware with no headless API; the certum-sign
-    # action drives it under Xvfb and signs with jsign over PKCS#11 — Linux only.
+    # SimplySign has no headless API; certum-sign drives its GUI under Xvfb, which needs Linux.
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/reactiveui/certum-signer:latest
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    # Map the Certum secrets into env so the composite action (which cannot
-    # declare secret-typed inputs) can read them.
+    # Composite actions cannot declare secret inputs, so certum-sign reads these from env.
     env:
       CERTUM_USER_ID: ${{ secrets.CERTUM_USER_ID }}
       CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}

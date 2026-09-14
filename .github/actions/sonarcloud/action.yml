@@ -70,8 +70,7 @@ runs:
         fi
 
     - name: Set up JDK 21 (SonarScanner prerequisite)
-      # Pin to 21 to match the JRE the scanner would otherwise provision, so
-      # sonar.scanner.skipJreProvisioning=true can reuse it instead of downloading one.
+      # skipJreProvisioning runs the scanner on this JDK instead of downloading a JRE.
       if: inputs.mode == 'begin'
       uses: actions/setup-java@v6
       with:
@@ -90,11 +89,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        # On Windows runners this step executes under Git Bash (MSYS2), which
-        # rewrites arguments that look like Unix paths — turning the scanner's
-        # /k:, /o:, /d: and /v: switches into k:, o:, ... and breaking the
-        # invocation. Excluding every argument from path conversion passes them
-        # through verbatim; harmless on Linux/macOS where no conversion happens.
+        # Git Bash on Windows rewrites path-like arguments, mangling the scanner's /k: /o: /d: /v: switches.
         MSYS2_ARG_CONV_EXCL: '*'
       run: |
         VERSION_ARG=""
@@ -145,7 +140,6 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        # See the begin step: stop Git Bash (MSYS2) on Windows from rewriting the
-        # /d:sonar.token switch (and the // in any URL value) before the scanner sees it.
+        # Same Git Bash path rewriting as the begin step.
         MSYS2_ARG_CONV_EXCL: '*'
       run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
