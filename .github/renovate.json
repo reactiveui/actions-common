@@ -21,5 +21,14 @@
                 "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\w+=(?<currentValue>\\S+)"
             ]
         }
+    ],
+    "packageRules": [
+        {
+            "description": "The certum-signer base image is pinned by digest, and a new digest is taken as soon as it is pushed so .NET SDK image security fixes are not held back.",
+            "matchManagers": ["dockerfile"],
+            "matchFileNames": ["docker/certum-signer/Dockerfile"],
+            "pinDigests": true,
+            "minimumReleaseAge": "0 days"
+        }
     ]
 }
