@@ -9,7 +9,7 @@ name: Common SonarCloud fork-PR analysis workflow
 
 permissions:
   contents: read
-  actions: read   # download the PR-metadata artifact from the triggering run
+  pull-requests: read
 
 concurrency:
   group: common-sonarcloud-fork-${{ github.workflow }}-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
@@ -126,11 +126,6 @@ on:
         default: 'windows-latest'
         description: 'Runner the scan executes on. Defaults to windows-latest to match the standard SonarCloud workflow.'
 
-      prMetadataArtifact:
-        type: string
-        default: 'pr-number'
-        description: 'Name of the artifact (uploaded by the untrusted PR build) holding the PR number/base. Must contain files named "number" and "base".'
-
     secrets:
       SONAR_TOKEN:
         required: true
@@ -154,34 +149,47 @@ jobs:
           dotnet-versions: ${{ inputs.dotnetVersions }}
           stamp-version: 'false'
 
-      - name: Download PR metadata
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: ${{ inputs.prMetadataArtifact }}
-          path: ${{ runner.temp }}/pr-meta
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ github.token }}
-
-      # Only the validated number reaches the checkout ref. The fork's branch names are read in the next step, so
-      # nothing from them can flow into this step's outputs.
-      - name: Resolve PR number
-        id: prnumber
+      # The pull request comes from the base repository's API, keyed by the commit the build ran on, so the fork
+      # cannot point the scan at a different pull request.
+      - name: Resolve pull request
+        id: pr
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          cd "$RUNNER_TEMP" && dotnet run - <<'CS'
+          cd "$RUNNER_TEMP" && dotnet run - -- "$REPOSITORY" "$HEAD_SHA" <<'CS'
+          using System.Net.Http.Headers;
+          using System.Text.Json;
           using static System.Environment;
 
-          var number = File.ReadAllText(Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "pr-meta", "number")).Trim();
-
-          // Numeric only: it is interpolated into the checkout ref and the scanner command line.
-          if (number is [] || !number.All(char.IsAsciiDigit))
+          if (args is not [var repository, var headSha])
           {
-              Console.WriteLine($"::error::PR number artifact is not numeric: '{number}'");
-              return 1;
+              Console.WriteLine("::error::Expected the repository and head commit arguments.");
+              return 2;
           }
 
-          File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!, [$"number={number}"]);
-          return 0;
+          using var http = new HttpClient();
+          http.DefaultRequestHeaders.UserAgent.ParseAdd("reactiveui-actions-common");
+          http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+          http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GetEnvironmentVariable("GH_TOKEN"));
+
+          var api = GetEnvironmentVariable("GITHUB_API_URL") ?? "https://api.github.com";
+          using var pulls = JsonDocument.Parse(await http.GetStringAsync($"{api}/repos/{repository}/commits/{headSha}/pulls"));
+
+          foreach (var pull in pulls.RootElement.EnumerateArray())
+          {
+              var head = pull.GetProperty("head");
+              if (head.GetProperty("sha").GetString() == headSha && head.GetProperty("repo") is { ValueKind: JsonValueKind.Object } fork && fork.GetProperty("full_name").GetString() != repository)
+              {
+                  File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!, [$"number={pull.GetProperty("number").GetInt32()}", $"base={pull.GetProperty("base").GetProperty("ref").GetString()}"]);
+                  return 0;
+              }
+          }
+
+          Console.WriteLine($"::error::No pull request from a fork has head commit {headSha}.");
+          return 1;
           CS
 
       - name: Resolve PR analysis arguments
@@ -190,19 +198,18 @@ jobs:
         env:
           # Fork-controlled: read through env, never interpolated into the script.
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          PR_NUMBER: ${{ steps.prnumber.outputs.number }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          BASE_BRANCH: ${{ steps.pr.outputs.base }}
         run: |
-          cd "$RUNNER_TEMP" && dotnet run - -- "$HEAD_BRANCH" "$PR_NUMBER" <<'CS'
+          cd "$RUNNER_TEMP" && dotnet run - -- "$HEAD_BRANCH" "$PR_NUMBER" "$BASE_BRANCH" <<'CS'
           using System.Text.RegularExpressions;
           using static System.Environment;
 
-          if (args is not [var headBranch, var number])
+          if (args is not [var headBranch, var number, var baseBranch])
           {
-              Console.WriteLine("::error::Expected the head branch and PR number arguments.");
+              Console.WriteLine("::error::Expected the head branch, PR number and base branch arguments.");
               return 2;
           }
-
-          var baseBranch = File.ReadAllText(Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "pr-meta", "base")).Trim();
 
           File.AppendAllLines(
               GetEnvironmentVariable("GITHUB_OUTPUT")!,
@@ -219,7 +226,7 @@ jobs:
         with:
           # The base repo's pull ref builds the fork's head commit with the upstream tags reachable,
           # so MinVer computes the same version as a normal build.
-          ref: refs/pull/${{ steps.prnumber.outputs.number }}/head
+          ref: refs/pull/${{ steps.pr.outputs.number }}/head
           fetch-depth: 0
           persist-credentials: false
 
