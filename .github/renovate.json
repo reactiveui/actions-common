@@ -28,6 +28,20 @@
             "matchDatasources": ["docker"],
             "pinDigests": true,
             "minimumReleaseAge": "0 days"
+        },
+        {
+            "description": "Minor, patch and digest updates to actions from GitHub and Microsoft merge automatically.",
+            "matchManagers": ["github-actions"],
+            "matchPackageNames": ["/^actions//", "/^github//", "/^microsoft//"],
+            "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
+            "automerge": true
+        },
+        {
+            "description": "Digest updates to Microsoft's and our own container images merge automatically.",
+            "matchDatasources": ["docker"],
+            "matchPackageNames": ["/^mcr\\.microsoft\\.com//", "/^ghcr\\.io/reactiveui//"],
+            "matchUpdateTypes": ["digest", "pin", "pinDigest"],
+            "automerge": true
         }
     ]
 }
