@@ -155,7 +155,7 @@ jobs:
           stamp-version: 'false'
 
       - name: Download PR metadata
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ${{ inputs.prMetadataArtifact }}
           path: ${{ runner.temp }}/pr-meta
@@ -200,7 +200,7 @@ jobs:
           CS
 
       - name: Checkout PR head
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # The base repo's pull ref builds the fork's head commit with the upstream tags reachable,
           # so MinVer computes the same version as a normal build.
