@@ -7,8 +7,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docker/certum-signer/Dockerfile'
-      - '.github/workflows/publish-certum-signer.yml'
+      - 'docker/certum-signer/**'
 
 permissions:
   contents: read
