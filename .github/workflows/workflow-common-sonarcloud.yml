@@ -141,12 +141,25 @@ on:
         description: 'SonarCloud token.'
 
 jobs:
+  changes:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.changes.outputs.code }}
+    steps:
+      - name: Detect changed areas
+        id: changes
+        uses: reactiveui/actions-common/.github/actions/detect-changes@main
+
   sonarcloud:
+    needs: changes
     # Fork PRs get no SONAR_TOKEN, so they are skipped here (a skipped job reports success) and
     # scanned by workflow-common-sonarcloud-fork.yml instead. The two conditions are mutually exclusive.
+    # A change under .github alone is skipped too.
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      !cancelled() && needs.changes.outputs.code != 'false' &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ${{ inputs.runsOn }}
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1

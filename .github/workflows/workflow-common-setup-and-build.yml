@@ -119,7 +119,20 @@ on:
         description: 'Token for uploading coverage reports to Codecov'
 
 jobs:
+  changes:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.changes.outputs.code }}
+    steps:
+      - name: Detect changed areas
+        id: changes
+        uses: reactiveui/actions-common/.github/actions/detect-changes@main
+
+  # A change under .github alone skips the build. A skipped job still passes a required check.
   build-windows:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: windows-latest
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
@@ -225,7 +238,10 @@ jobs:
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
           test-timeout: ${{ inputs.testTimeout }}
 
+  # A skipped matrix job reports no per-OS check, so the steps skip instead and each required check still passes.
   build-unix:
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -235,11 +251,13 @@ jobs:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
     steps:
       - name: Checkout
+        if: needs.changes.outputs.code != 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - name: Setup .NET Environment
+        if: needs.changes.outputs.code != 'false'
         id: environment
         uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
         with:
@@ -253,6 +271,7 @@ jobs:
           minver-default-pre-release-identifiers: ${{ inputs.minverDefaultPreReleaseIdentifiers }}
 
       - name: Build
+        if: needs.changes.outputs.code != 'false'
         uses: reactiveui/actions-common/.github/actions/dotnet-build@main
         with:
           configuration: ${{ inputs.configuration }}
@@ -261,7 +280,7 @@ jobs:
           create-packages: 'false'
 
       - name: Test
-        if: inputs.performTests == true
+        if: needs.changes.outputs.code != 'false' && inputs.performTests == true
         uses: reactiveui/actions-common/.github/actions/dotnet-test@main
         with:
           configuration: ${{ inputs.configuration }}
@@ -270,11 +289,12 @@ jobs:
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
           test-timeout: ${{ inputs.testTimeout }}
 
+  # The results are checked directly because the changes job skips on events other than push and pull_request.
   collect-coverage:
     needs:
       - build-windows
       - build-unix
-    if: inputs.performTests == true
+    if: ${{ !cancelled() && inputs.performTests == true && needs.build-windows.result == 'success' && needs.build-unix.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (for PR summary context)

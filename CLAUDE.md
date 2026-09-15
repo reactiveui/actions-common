@@ -164,11 +164,23 @@ Use the newest C# the .NET 11 SDK accepts:
 
 - `.github/renovate.json` extends the organisation's
   [preset](https://github.com/reactiveui/.github/blob/main/renovate.json). Rules here apply after the organisation's.
-- Docker images and `actions/*`, `github/*` and `microsoft/*` actions are pinned by digest with no release delay.
-- Minor, patch and digest updates to those actions, and digest updates to `mcr.microsoft.com`,
-  `ghcr.io/reactiveui` and `docker/dockerfile` images, merge automatically.
+- The preset pins Docker images and `actions/*`, `github/*` and `microsoft/*` actions by digest with no release
+  delay. It merges minor, patch and digest updates to those actions, and digest updates to `mcr.microsoft.com`,
+  `ghcr.io/reactiveui` and `docker/dockerfile` images, automatically. Change those rules in the preset, not here.
 - `reactiveui/*` actions stay on `@main`. Do not pin them.
 - A Dockerfile `ARG` with a `# renovate: datasource=... depName=...` comment on the line above is tracked.
+
+## Skipping Jobs by Changed Files
+
+- The build, SonarCloud, CodeQL and AOT workflows start with a `changes` job that runs `detect-changes`.
+- A push or pull request that only changes `.github` skips the code jobs. CodeQL skips the Actions analysis when
+  nothing under `.github` changed.
+- **Skip with `if:`, never with `paths:` filters.** Repositories require these checks. A skipped job passes a
+  required check, and a workflow that never starts leaves the check waiting.
+- **A matrix job skips its steps, not the job.** A skipped matrix job reports one check without the matrix values,
+  so `build-unix (ubuntu-latest)` would never report.
+- **Guard dependents with `!cancelled()`.** The `changes` job skips on events other than push and pull request,
+  and a skipped dependency skips every job after it unless the condition says otherwise.
 
 ## Decisions Already Made
 

@@ -45,8 +45,20 @@ on:
         description: 'If true, run workload restore during environment setup.'
 
 jobs:
+  changes:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.changes.outputs.code }}
+    steps:
+      - name: Detect changed areas
+        id: changes
+        uses: reactiveui/actions-common/.github/actions/detect-changes@main
+
   aot-smoke:
     name: aot-smoke (${{ matrix.rid }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

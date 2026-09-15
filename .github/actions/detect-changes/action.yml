@@ -1,0 +1,71 @@
+name: Detect Changes
+description: |
+  Report which areas a push or pull request changes: files under .github, files outside it, or both. Any other
+  event, or a change that cannot be compared, reports both.
+
+outputs:
+  code:
+    description: "'true' when a file outside .github changed."
+    value: ${{ steps.detect.outputs.code }}
+  workflows:
+    description: "'true' when a file under .github changed."
+    value: ${{ steps.detect.outputs.workflows }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        fetch-depth: 2
+
+    - name: Setup .NET Environment
+      uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+      with:
+        dotnet-versions: '11.0.x'
+        stamp-version: 'false'
+
+    - name: Compare changed files
+      id: detect
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BEFORE: ${{ github.event.before }}
+      run: |
+        cd "$RUNNER_TEMP" && dotnet run - -- "$EVENT_NAME" "$BEFORE" <<'CS'
+        using System.Diagnostics;
+        using static System.Environment;
+
+        if (args is not [var eventName, var before])
+        {
+            Console.WriteLine("::error::Expected the event name and before-commit arguments.");
+            return 2;
+        }
+
+        Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+
+        // A pull request checks out its merge commit, whose first parent is the base branch. A new branch pushes an
+        // all-zero before commit.
+        string? baseline = eventName switch
+        {
+            "pull_request" => "HEAD^1",
+            "push" when before.Trim('0') is not "" && Process.Run("git", ["fetch", "--no-tags", "--depth=1", "origin", before]) is { ExitCode: 0 } => before,
+            _ => null,
+        };
+
+        string[] files = baseline is null
+            ? []
+            : Process.RunAndCaptureText("git", ["diff", "--name-only", baseline, "HEAD"]) switch
+            {
+                { ExitStatus.ExitCode: 0, StandardOutput: var output } => output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                _ => [],
+            };
+
+        // With nothing to compare, both areas count as changed so every job runs.
+        var workflows = files is [] || files.Any(file => file.StartsWith(".github/", StringComparison.Ordinal));
+        var code = files is [] || files.Any(file => !file.StartsWith(".github/", StringComparison.Ordinal));
+
+        Console.WriteLine($"Changed files: {files.Length}. Code: {code}. Workflows: {workflows}.");
+        File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!, [$"code={(code ? "true" : "false")}", $"workflows={(workflows ? "true" : "false")}"]);
+        return 0;
+        CS

@@ -63,9 +63,23 @@ on:
         description: 'Run CodeQL JavaScript/TypeScript analysis'
 
 jobs:
+  changes:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.changes.outputs.code }}
+      workflows: ${{ steps.changes.outputs.workflows }}
+    steps:
+    - name: Detect changed areas
+      id: changes
+      uses: reactiveui/actions-common/.github/actions/detect-changes@main
+
+  # Code is analysed when code changes and GitHub Actions when .github changes. A skipped job still passes a
+  # required check.
   analyze-csharp:
     name: Analyze C#
-    if: inputs.analyzeCSharp
+    needs: changes
+    if: ${{ !cancelled() && inputs.analyzeCSharp && needs.changes.outputs.code != 'false' }}
     runs-on: ${{ inputs.csharpRunsOn }}
     env:
       DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
@@ -106,7 +120,8 @@ jobs:
 
   analyze-actions:
     name: Analyze GitHub Actions
-    if: inputs.analyzeActions
+    needs: changes
+    if: ${{ !cancelled() && inputs.analyzeActions && needs.changes.outputs.workflows != 'false' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -128,7 +143,8 @@ jobs:
 
   analyze-javascript:
     name: Analyze JavaScript
-    if: inputs.analyzeJavaScript
+    needs: changes
+    if: ${{ !cancelled() && inputs.analyzeJavaScript && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
 
     steps:

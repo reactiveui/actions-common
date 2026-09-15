@@ -73,6 +73,10 @@ This repository has no CI that runs the reusable workflows. The repositories tha
 | `workflow-common-benchmarks.yml` | Runs [BenchmarkDotNet](https://github.com/dotnet/BenchmarkDotNet) projects and writes the results to the run summary. |
 | `workflow-common-benchmarks-ab.yml` | Benchmarks two commits on one runner and marks each benchmark faster, slower or unresolved. |
 
+The build, SonarCloud, CodeQL and AOT workflows skip work a change cannot affect. A push or pull request that only
+changes `.github` skips the build, tests, SonarCloud and the C# and JavaScript analysis. CodeQL analyses GitHub
+Actions only when something under `.github` changed. Skipped jobs still pass required checks.
+
 ## Composite actions
 
 | Action | What it does |
@@ -86,6 +90,7 @@ This repository has no CI that runs the reusable workflows. The repositories tha
 | `sonarcloud` | Starts a SonarCloud scan before the build and finishes it after the tests. |
 | `certum-sign` | Signs `.nupkg` files inside the signer image. |
 | `dotnet-benchmarks` | Checks out a commit and runs benchmark projects for the A/B workflow. |
+| `detect-changes` | Reports whether a push or pull request changes files under `.github`, files outside it, or both. |
 
 ## Steps are written in C#
 
@@ -179,7 +184,8 @@ The pack adds `reactiveui` to the owners CodeQL trusts. Actions from any other o
 ## How dependencies stay current
 
 Renovate opens pull requests for dependency updates. It uses the organisation's
-[preset](https://github.com/reactiveui/.github/blob/main/renovate.json) and the rules in `.github/renovate.json`.
+[preset](https://github.com/reactiveui/.github/blob/main/renovate.json), which every ReactiveUI repository shares,
+and the rules in `.github/renovate.json`.
 
 - **Docker images and actions from `actions/*`, `github/*` and `microsoft/*` are pinned by digest.** A digest names
   one exact image or commit. Renovate updates the digest on the day a new version appears.
