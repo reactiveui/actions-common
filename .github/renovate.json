@@ -30,6 +30,13 @@
             "minimumReleaseAge": "0 days"
         },
         {
+            "description": "Actions from GitHub and Microsoft are pinned by digest and taken as soon as they are released. reactiveui/* actions stay on @main.",
+            "matchManagers": ["github-actions"],
+            "matchPackageNames": ["/^actions//", "/^github//", "/^microsoft//"],
+            "pinDigests": true,
+            "minimumReleaseAge": "0 days"
+        },
+        {
             "description": "Minor, patch and digest updates to actions from GitHub and Microsoft merge automatically.",
             "matchManagers": ["github-actions"],
             "matchPackageNames": ["/^actions//", "/^github//", "/^microsoft//"],
