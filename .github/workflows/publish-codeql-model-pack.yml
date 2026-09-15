@@ -19,23 +19,19 @@ jobs:
   publish:
     name: Publish pack
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/dotnet/sdk:11.0-resolute@sha256:335dfd6679df1025209964f3e2592c0f1808501d17b9295640fd1a41d132c117
-    defaults:
-      run:
-        shell: bash
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PACK_DIR: codeql/actions-trusted-owners
     steps:
-      # Without git in the image, checkout downloads a tarball with no history to count commits from.
-      - name: Install git and the GitHub CLI
-        run: apt-get update && apt-get install -y --no-install-recommends git gh
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
 
       - name: Install the CodeQL CLI
         run: |
@@ -44,6 +40,7 @@ jobs:
           gh codeql set-version latest
 
       - name: Stamp pack version
+        shell: bash
         run: |
           cd "$RUNNER_TEMP" && dotnet run - -- "$PACK_DIR" <<'CS'
           using System.Diagnostics;
@@ -82,6 +79,7 @@ jobs:
         run: gh codeql pack install "$PACK_DIR"
 
       - name: Publish pack
+        shell: bash
         run: |
           cd "$RUNNER_TEMP" && dotnet run - -- "$PACK_DIR" <<'CS'
           using System.Diagnostics;
