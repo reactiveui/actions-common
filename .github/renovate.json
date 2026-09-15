@@ -44,9 +44,9 @@
             "automerge": true
         },
         {
-            "description": "Digest updates to Microsoft's and our own container images merge automatically.",
+            "description": "Digest updates to Microsoft's, Docker's Dockerfile syntax and our own container images merge automatically.",
             "matchDatasources": ["docker"],
-            "matchPackageNames": ["/^mcr\\.microsoft\\.com//", "/^ghcr\\.io/reactiveui//"],
+            "matchPackageNames": ["/^mcr\\.microsoft\\.com//", "/^ghcr\\.io/reactiveui//", "docker/dockerfile"],
             "matchUpdateTypes": ["digest", "pin", "pinDigest"],
             "automerge": true
         }
