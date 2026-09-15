@@ -21,7 +21,7 @@ jobs:
       IMAGE: ghcr.io/reactiveui/certum-signer
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Setup .NET Environment
         uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
