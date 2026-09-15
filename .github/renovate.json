@@ -24,9 +24,8 @@
     ],
     "packageRules": [
         {
-            "description": "The certum-signer base image is pinned by digest, and a new digest is taken as soon as it is pushed so .NET SDK image security fixes are not held back.",
-            "matchManagers": ["dockerfile"],
-            "matchFileNames": ["docker/certum-signer/Dockerfile"],
+            "description": "Every Docker image is pinned by digest, and a new digest is taken as soon as it is pushed so image security fixes are not held back.",
+            "matchDatasources": ["docker"],
             "pinDigests": true,
             "minimumReleaseAge": "0 days"
         }
