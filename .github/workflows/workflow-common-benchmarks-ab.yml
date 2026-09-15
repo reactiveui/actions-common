@@ -43,7 +43,7 @@ jobs:
       - name: Benchmark base
         uses: reactiveui/actions-common/.github/actions/dotnet-benchmarks@main
         with:
-          ref: ${{ inputs.base }}
+          revision: ${{ inputs.base }}
           projects: ${{ inputs.projects }}
           results-folder: ${{ runner.temp }}/benchmark-ab/base
           solution-file: ${{ inputs.solutionFile }}
@@ -52,7 +52,7 @@ jobs:
       - name: Benchmark head
         uses: reactiveui/actions-common/.github/actions/dotnet-benchmarks@main
         with:
-          ref: ${{ inputs.head }}
+          revision: ${{ inputs.head }}
           projects: ${{ inputs.projects }}
           results-folder: ${{ runner.temp }}/benchmark-ab/head
           solution-file: ${{ inputs.solutionFile }}

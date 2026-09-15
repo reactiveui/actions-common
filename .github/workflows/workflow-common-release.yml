@@ -86,7 +86,7 @@ on:
         default: 'windows-latest'
         description: 'Runner for the build/pack job (e.g. windows-latest, ubuntu-latest). Certum signing always runs on Linux regardless. Defaults to windows-latest because several projects have Windows-specific build logic.'
 
-      ref:
+      sourceRef:
         type: string
         default: ''
         description: 'Git ref (branch, tag, or SHA) to build/pack. Empty = the ref that triggered the run (normally the default branch). Use this to re-release historical source (e.g. a tag) with the current signing pipeline.'
@@ -102,7 +102,7 @@ on:
         description: 'true when the released version is a pre-release (preRelease channel set, or a hyphenated versionOverride). Pass to workflow-common-create-release so the GitHub release is flagged pre-release.'
         value: ${{ jobs.build.outputs.prerelease }}
       sourceSha:
-        description: 'Resolved commit SHA that was actually built (honors the ref input). Pass to workflow-common-create-release as target so the new release tag points at the built commit.'
+        description: 'Resolved commit SHA that was actually built (honors the sourceRef input). Pass to workflow-common-create-release as target so the new release tag points at the built commit.'
         value: ${{ jobs.build.outputs.sourceSha }}
 
     secrets:
@@ -132,7 +132,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.sourceRef }}
           fetch-depth: 0
 
       - name: Setup .NET Environment
@@ -257,10 +257,14 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
 
+      # SOLUTION_FILE stays unquoted so an empty value passes no argument.
       - name: Pack NuGet packages
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
-        run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }} -o "${GITHUB_WORKSPACE}/packages"
+        env:
+          CONFIGURATION: ${{ inputs.configuration }}
+          SOLUTION_FILE: ${{ inputs.solutionFile }}
+        run: dotnet pack --no-restore --configuration "$CONFIGURATION" $SOLUTION_FILE -o "${GITHUB_WORKSPACE}/packages"
 
       - name: Upload unsigned packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

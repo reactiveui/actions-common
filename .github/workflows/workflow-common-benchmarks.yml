@@ -15,7 +15,7 @@ on:
         required: true
         description: 'Newline-separated list of benchmark projects (.csproj) to run, relative to srcFolder. Blank lines are skipped, so a caller can build the list from a suite choice.'
 
-      ref:
+      revision:
         type: string
         default: ''
         description: 'Commit to check out and measure. Empty measures the commit that triggered the run.'
@@ -114,7 +114,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ inputs.revision }}
           fetch-depth: 0
 
       - name: Setup .NET Environment
@@ -264,7 +264,7 @@ jobs:
           var summary = GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!;
           var root = Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "benchmark-artifacts");
 
-          // With a ref input the triggering commit is not the measured one, so the checked-out commit MinVer read comes first.
+          // With a revision input the triggering commit is not the measured one, so the checked-out commit MinVer read comes first.
           var commit = GetEnvironmentVariable("MINVER_GitCommitId") ?? GetEnvironmentVariable("GITHUB_SHA");
 
           File.AppendAllLines(

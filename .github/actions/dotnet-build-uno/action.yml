@@ -18,9 +18,12 @@ inputs:
 runs:
   using: composite
   steps:
+    # SOLUTION_FILE stays unquoted so an empty value passes no argument.
     - name: Restore NuGet packages
       shell: bash
-      run: dotnet restore ${{ inputs.solution-file }}
+      env:
+        SOLUTION_FILE: ${{ inputs.solution-file }}
+      run: dotnet restore $SOLUTION_FILE
       working-directory: ${{ inputs.src-folder }}
 
     - name: Add MSBuild to PATH (Visual Studio)
@@ -29,6 +32,11 @@ runs:
         vs-prerelease: true
 
     - name: Build and pack UNO solution with MSBuild
-      shell: cmd
-      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal /p:Configuration=${{ inputs.configuration }} ${{ inputs.solution-file }}
+      shell: bash
+      env:
+        # Git Bash rewrites path-like arguments, mangling the /t: and /p: switches.
+        MSYS2_ARG_CONV_EXCL: '*'
+        CONFIGURATION: ${{ inputs.configuration }}
+        SOLUTION_FILE: ${{ inputs.solution-file }}
+      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal "/p:Configuration=$CONFIGURATION" $SOLUTION_FILE
       working-directory: ${{ inputs.src-folder }}

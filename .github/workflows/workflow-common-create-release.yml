@@ -52,7 +52,8 @@ jobs:
       - name: Generate release notes
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: git-release-notes --release-version "${{ inputs.version }}" --output-file release-notes.md
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: git-release-notes --release-version "$RELEASE_VERSION" --output-file release-notes.md
 
       # Also creates the tag, pinned by --target to the commit the release job built.
       - name: Create GitHub Release

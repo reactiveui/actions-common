@@ -81,10 +81,14 @@ jobs:
           src-folder: ${{ inputs.srcFolder }}
           solution-file: ${{ inputs.solutionFile }}
 
+      # SOLUTION_FILE stays unquoted so an empty value passes no argument.
       - name: Pack NuGet packages
         shell: bash
         working-directory: ${{ inputs.srcFolder }}
-        run: dotnet pack --no-restore --configuration ${{ inputs.configuration }} ${{ inputs.solutionFile }} -o "${GITHUB_WORKSPACE}/packages"
+        env:
+          CONFIGURATION: ${{ inputs.configuration }}
+          SOLUTION_FILE: ${{ inputs.solutionFile }}
+        run: dotnet pack --no-restore --configuration "$CONFIGURATION" $SOLUTION_FILE -o "${GITHUB_WORKSPACE}/packages"
 
       - name: Upload Packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

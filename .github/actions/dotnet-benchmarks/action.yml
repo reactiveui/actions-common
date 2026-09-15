@@ -2,7 +2,7 @@ name: .NET Benchmarks
 description: Check out a commit and run BenchmarkDotNet projects, writing their reports to a results folder.
 
 inputs:
-  ref:
+  revision:
     description: 'Commit to check out. Empty uses the commit that triggered the run.'
     required: false
     default: ''
@@ -27,7 +27,7 @@ runs:
     - name: Checkout
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
-        ref: ${{ inputs.ref }}
+        ref: ${{ inputs.revision }}
         fetch-depth: 0
 
     - name: Setup .NET Environment
