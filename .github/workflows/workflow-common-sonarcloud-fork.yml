@@ -162,25 +162,16 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - name: Resolve PR analysis arguments
-        id: prargs
+      # Only the validated number reaches the checkout ref. The fork's branch names are read in the next step, so
+      # nothing from them can flow into this step's outputs.
+      - name: Resolve PR number
+        id: prnumber
         shell: bash
-        env:
-          # Fork-controlled: read through env, never interpolated into the script.
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          cd "$RUNNER_TEMP" && dotnet run - -- "$HEAD_BRANCH" <<'CS'
-          using System.Text.RegularExpressions;
+          cd "$RUNNER_TEMP" && dotnet run - <<'CS'
           using static System.Environment;
 
-          if (args is not [var headBranch])
-          {
-              Console.WriteLine("::error::Expected the head branch argument.");
-              return 2;
-          }
-
-          var metadata = Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "pr-meta");
-          string number = File.ReadAllText(Path.Combine(metadata, "number")).Trim(), baseBranch = File.ReadAllText(Path.Combine(metadata, "base")).Trim();
+          var number = File.ReadAllText(Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "pr-meta", "number")).Trim();
 
           // Numeric only: it is interpolated into the checkout ref and the scanner command line.
           if (number is [] || !number.All(char.IsAsciiDigit))
@@ -189,9 +180,33 @@ jobs:
               return 1;
           }
 
+          File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!, [$"number={number}"]);
+          return 0;
+          CS
+
+      - name: Resolve PR analysis arguments
+        id: prargs
+        shell: bash
+        env:
+          # Fork-controlled: read through env, never interpolated into the script.
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PR_NUMBER: ${{ steps.prnumber.outputs.number }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$HEAD_BRANCH" "$PR_NUMBER" <<'CS'
+          using System.Text.RegularExpressions;
+          using static System.Environment;
+
+          if (args is not [var headBranch, var number])
+          {
+              Console.WriteLine("::error::Expected the head branch and PR number arguments.");
+              return 2;
+          }
+
+          var baseBranch = File.ReadAllText(Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "pr-meta", "base")).Trim();
+
           File.AppendAllLines(
               GetEnvironmentVariable("GITHUB_OUTPUT")!,
-              [$"number={number}", $"args=/d:sonar.pullrequest.key={number} /d:sonar.pullrequest.branch={Sanitize(headBranch)} /d:sonar.pullrequest.base={Sanitize(baseBranch)}"]);
+              [$"args=/d:sonar.pullrequest.key={number} /d:sonar.pullrequest.branch={Sanitize(headBranch)} /d:sonar.pullrequest.base={Sanitize(baseBranch)}"]);
 
           return 0;
 
@@ -204,7 +219,7 @@ jobs:
         with:
           # The base repo's pull ref builds the fork's head commit with the upstream tags reachable,
           # so MinVer computes the same version as a normal build.
-          ref: refs/pull/${{ steps.prargs.outputs.number }}/head
+          ref: refs/pull/${{ steps.prnumber.outputs.number }}/head
           fetch-depth: 0
           persist-credentials: false
 
