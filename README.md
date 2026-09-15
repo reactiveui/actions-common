@@ -17,7 +17,6 @@ shared pieces that do that work. Each repository calls them instead of keeping i
 - [How dependencies stay current](#how-dependencies-stay-current)
 - [Why there is no dependency cache](#why-there-is-no-dependency-cache)
 - [Coverage from three operating systems](#coverage-from-three-operating-systems)
-- [SonarCloud on pull requests from forks](#sonarcloud-on-pull-requests-from-forks)
 - [WinUI tests](#winui-tests)
 
 ## What this repository gives you
@@ -67,7 +66,6 @@ This repository has no CI that runs the reusable workflows. The repositories tha
 | `workflow-common-create-release.yml` | Creates the GitHub release and its tag, with release notes and the packages attached. |
 | `workflow-common-publish-github-packages.yml` | Pushes packages to GitHub Packages. |
 | `workflow-common-sonarcloud.yml` | Runs SonarCloud analysis on pushes and on pull requests from the same repository. |
-| `workflow-common-sonarcloud-fork.yml` | Runs SonarCloud analysis on pull requests from forks. |
 | `workflow-common-codeql.yml` | Runs CodeQL on C#, on the repository's GitHub Actions and, if you ask, on JavaScript. |
 | `workflow-common-aot-smoke.yml` | Publishes a native AOT test app on Windows, Linux and macOS and runs it. |
 | `workflow-common-benchmarks.yml` | Runs [BenchmarkDotNet](https://github.com/dotnet/BenchmarkDotNet) projects and writes the results to the run summary. |
@@ -207,17 +205,6 @@ Each operating system uploads its coverage as a temporary artifact. The collect 
 artifact with [`actions/upload-artifact/merge`](https://github.com/actions/upload-artifact/blob/main/merge/README.md)
 and deletes the temporary ones. It then uploads the merged coverage
 to Codecov.
-
-## SonarCloud on pull requests from forks
-
-A pull request from a fork gets no secrets, so its own workflow cannot scan. `workflow-common-sonarcloud-fork.yml`
-runs afterwards in the base repository, where the token exists.
-
-- It checks out the fork's commit through the base repository's pull ref. The release tags stay reachable, so the
-  version matches a normal build.
-- It removes unsafe characters from the fork's branch names before they reach the scanner.
-- It still builds the fork's code on a runner that holds the token. That risk is accepted because the token can
-  only analyse one project.
 
 ## WinUI tests
 

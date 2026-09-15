@@ -153,9 +153,8 @@ jobs:
 
   sonarcloud:
     needs: changes
-    # Fork PRs get no SONAR_TOKEN, so they are skipped here (a skipped job reports success) and
-    # scanned by workflow-common-sonarcloud-fork.yml instead. The two conditions are mutually exclusive.
-    # A change under .github alone is skipped too.
+    # Fork PRs get no SONAR_TOKEN, so they are skipped (a skipped job reports success). A change under .github
+    # alone is skipped too.
     if: >-
       !cancelled() && needs.changes.outputs.code != 'false' &&
       (github.event_name != 'pull_request' ||
