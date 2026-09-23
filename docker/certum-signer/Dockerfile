@@ -10,7 +10,7 @@
 # Base: .NET 11 SDK on Ubuntu 26.04 (Resolute). SimplySign bundles its own Qt 5.9,
 # whose WebKit links libxml2.so.2; Resolute ships only libxml2.so.16, so the xml
 # stage builds the last .so.2 libxml2 and a libxslt against it.
-FROM mcr.microsoft.com/dotnet/sdk:11.0-resolute@sha256:dbfff067552406b140d236bc7fddc6a1df52f3b4b76e184f08067f36c6170806 AS xml
+FROM mcr.microsoft.com/dotnet/sdk:11.0-resolute@sha256:ab11199f8a0cded1d667111a0d4f0906567c3a17348a7181f9781d12cc5eb6f9 AS xml
 
 ARG LIBXML2_VERSION=2.13.9
 ARG LIBXML2_SHA256=a2c9ae7b770da34860050c309f903221c67830c86e4a7e760692b803df95143a
@@ -39,7 +39,7 @@ RUN curl -fsSL -o /tmp/libxslt.tar.xz "https://download.gnome.org/sources/libxsl
     && PKG_CONFIG_PATH=/opt/xml/lib/pkgconfig ./configure --prefix=/opt/xml --disable-static --without-python --without-crypto \
     && make -j"$(nproc)" install
 
-FROM mcr.microsoft.com/dotnet/sdk:11.0-resolute@sha256:dbfff067552406b140d236bc7fddc6a1df52f3b4b76e184f08067f36c6170806
+FROM mcr.microsoft.com/dotnet/sdk:11.0-resolute@sha256:ab11199f8a0cded1d667111a0d4f0906567c3a17348a7181f9781d12cc5eb6f9
 
 # SimplySign Desktop Linux (Ubuntu) installer. No Renovate datasource exists for
 # Certum's file host, so bump this manually when Certum ships a new version.
