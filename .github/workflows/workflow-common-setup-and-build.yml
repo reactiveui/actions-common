@@ -82,7 +82,8 @@ on:
 
       windowsAppRuntimeVersion:
         type: string
-        default: '2.3'
+        # renovate: datasource=nuget depName=Microsoft.WindowsAppSDK
+        default: '2.5'
         description: 'Windows App SDK major.minor whose runtime to install when installWindowsAppRuntime is true'
 
       mergedCoverageArtifactName:
