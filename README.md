@@ -210,3 +210,6 @@ to Codecov.
 
 A WinUI test needs the Windows App Runtime. Workloads do not install it and the runner image does not have it.
 Set `installWindowsAppRuntime: true` and the workflow installs it before the tests run.
+
+The runtime defaults to the latest stable `Microsoft.WindowsAppSDK` major.minor, which Renovate keeps current.
+Set `windowsAppRuntimeVersion` only to pin an older runtime.
