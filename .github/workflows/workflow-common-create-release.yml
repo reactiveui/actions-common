@@ -51,6 +51,7 @@ jobs:
 
       - name: Generate release notes
         env:
+          DOTNET_ROLL_FORWARD: Major
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: git-release-notes --release-version "$RELEASE_VERSION" --output-file release-notes.md

@@ -6,13 +6,9 @@ description: |
 
 inputs:
   dotnet-versions:
-    description: 'Newline-separated list of .NET SDK versions'
+    description: 'Newline-separated list of .NET SDK versions. A job that builds or tests a project passes every SDK it targets.'
     required: false
-    default: |
-      8.0.x
-      9.0.x
-      10.0.x
-      11.0.x
+    default: '11.0.x'
   src-folder:
     description: 'Folder containing the solution'
     required: false

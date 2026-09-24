@@ -31,6 +31,15 @@ on:
         default: false
         description: 'Run workload restore.'
 
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+          11.0.x
+        description: 'Newline-separated list of .NET SDKs to install. It must cover every runtime the benchmark classes declare a job for.'
+
 jobs:
   benchmark:
     runs-on: windows-latest
@@ -48,6 +57,7 @@ jobs:
           results-folder: ${{ runner.temp }}/benchmark-ab/base
           solution-file: ${{ inputs.solutionFile }}
           install-workloads: ${{ inputs.installWorkloads }}
+          dotnet-versions: ${{ inputs.dotnetVersions }}
 
       - name: Benchmark head
         uses: reactiveui/actions-common/.github/actions/dotnet-benchmarks@main
@@ -57,6 +67,7 @@ jobs:
           results-folder: ${{ runner.temp }}/benchmark-ab/head
           solution-file: ${{ inputs.solutionFile }}
           install-workloads: ${{ inputs.installWorkloads }}
+          dotnet-versions: ${{ inputs.dotnetVersions }}
 
       - name: Compare base and head
         shell: bash

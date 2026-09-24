@@ -20,6 +20,14 @@ inputs:
     description: 'Run workload restore.'
     required: false
     default: 'false'
+  dotnet-versions:
+    description: 'Newline-separated list of .NET SDKs to install. It must cover every runtime the benchmark classes declare a job for.'
+    required: false
+    default: |
+      8.0.x
+      9.0.x
+      10.0.x
+      11.0.x
 
 runs:
   using: composite
@@ -33,6 +41,7 @@ runs:
     - name: Setup .NET Environment
       uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
       with:
+        dotnet-versions: ${{ inputs.dotnet-versions }}
         solution-file: ${{ inputs.solution-file }}
         install-workloads: ${{ inputs.install-workloads }}
 

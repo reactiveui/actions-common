@@ -321,7 +321,6 @@ jobs:
       - name: Setup .NET Environment
         uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
         with:
-          dotnet-versions: ${{ inputs.dotnetVersions }}
           stamp-version: 'false'
 
       - name: Install and Upload to Codecov
