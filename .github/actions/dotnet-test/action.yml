@@ -48,10 +48,13 @@ runs:
         TEST_PROJECTS: ${{ inputs.test-projects }}
       run: |
         cd "$RUNNER_TEMP" && dotnet run - -- "$SRC_FOLDER" "$SOLUTION_FILE" "$CONFIGURATION" "$DETAILED_LOGGING" "$TEST_TIMEOUT" "$TEST_PROJECTS" <<'CS'
+        #:package Microsoft.Extensions.FileSystemGlobbing@10.0.12
+
         using System.Diagnostics;
         using System.Text.Json;
         using System.Text.RegularExpressions;
         using System.Xml.Linq;
+        using Microsoft.Extensions.FileSystemGlobbing;
         using static System.Environment;
 
         if (args is not [var srcFolder, var solutionFile, var configuration, var detailedLogging, var testTimeout, var testProjects])
@@ -82,13 +85,20 @@ runs:
                 return 1;
             }
 
-            Regex[] includes = [.. patterns.Where(static p => !p.StartsWith('!')).Select(Glob)];
-            Regex[] excludes = [.. patterns.Where(static p => p.StartsWith('!')).Select(static p => Glob(p[1..]))];
-            string[] projects = [.. SolutionProjects(solutionPath).Where(project =>
+            // Match the solution's own project list in memory; nothing is read from disk.
+            Matcher matcher = new(StringComparison.OrdinalIgnoreCase);
+            matcher.AddIncludePatterns(patterns.Where(static p => !p.StartsWith('!')));
+            matcher.AddExcludePatterns(patterns.Where(static p => p.StartsWith('!')).Select(static p => p[1..]));
+
+            string root = Path.GetDirectoryName(Path.GetFullPath(solutionPath))!;
+            Dictionary<string, string> listed = [with(StringComparer.OrdinalIgnoreCase)];
+            foreach (string project in SolutionProjects(solutionPath))
             {
-                string path = project.Replace('\\', '/');
-                return includes.Any(glob => glob.IsMatch(path)) && !excludes.Any(glob => glob.IsMatch(path));
-            })];
+                listed[project.Replace('\\', '/')] = project;
+            }
+
+            string[] projects = [.. matcher.Match(root, listed.Keys.Select(path => Path.Combine(root, path))).Files
+                .Select(match => listed[match.Path])];
 
             if (projects is [])
             {
@@ -97,7 +107,7 @@ runs:
             }
 
             // A solution filter keeps dotnet test running the chosen projects in parallel, as it does for the whole solution.
-            string filterPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(solutionPath))!, "ci-test-projects.slnf");
+            string filterPath = Path.Combine(root, "ci-test-projects.slnf");
             using (FileStream stream = File.Create(filterPath))
             using (Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = true }))
             {
@@ -142,19 +152,6 @@ runs:
                 ? XDocument.Load(solutionPath).Descendants("Project").Select(static p => (string?)p.Attribute("Path")).OfType<string>()
                 : Regex.Matches(File.ReadAllText(solutionPath), "^Project\\(\"[^\"]*\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+\\.[a-z]+proj)\"", RegexOptions.Multiline | RegexOptions.IgnoreCase)
                     .Select(static m => m.Groups[1].Value);
-
-        // "**/" spans folders, "*" and "?" stay within one folder name.
-        static Regex Glob(string pattern)
-        {
-            string escaped = Regex.Escape(pattern.Replace('\\', '/'))
-                .Replace(@"\*\*/", "\u0001", StringComparison.Ordinal)
-                .Replace(@"\*\*", "\u0002", StringComparison.Ordinal)
-                .Replace(@"\*", "[^/]*", StringComparison.Ordinal)
-                .Replace(@"\?", "[^/]", StringComparison.Ordinal)
-                .Replace("\u0001", "(?:.*/)?", StringComparison.Ordinal)
-                .Replace("\u0002", ".*", StringComparison.Ordinal);
-            return new Regex($"^{escaped}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        }
         CS
 
     - name: Upload per-OS coverage reports as build artifacts
