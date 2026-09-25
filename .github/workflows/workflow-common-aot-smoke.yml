@@ -98,12 +98,11 @@ jobs:
         env:
           PROJECT_FILE: ${{ inputs.projectFile }}
           CONFIGURATION: ${{ inputs.configuration }}
-        # Each leg's rid is its runner's own, which an AOT or trimmed publish uses when none is given. Passing
-        # --runtime would make it a global property, and every referenced project would restore for it, including
-        # multi-targeted heads such as net10.0-ios that have no assets for a desktop runtime.
+          RID: ${{ matrix.rid }}
         run: |
           dotnet publish "$PROJECT_FILE" \
             --configuration "$CONFIGURATION" \
+            --runtime "$RID" \
             --output "aot-publish"
 
       - name: Run native AOT smoke test
