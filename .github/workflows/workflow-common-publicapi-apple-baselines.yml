@@ -1,0 +1,203 @@
+name: Common PublicAPI baselines for Apple targets
+
+# Regenerates the PublicApiSharp baselines for the Apple target frameworks (ios, macos, maccatalyst),
+# which Linux cannot build, on a macOS runner and uploads them as an artifact. Linux regenerates every
+# other target framework locally; download this artifact and copy the Apple files over the tree.
+#
+# Each baseline is emptied and the PublicApiSharp code fix (PAS0001) renders the whole surface back
+# into it. Windows runners do not persist that edit, so this runs on macOS.
+
+on:
+  workflow_call:
+    inputs:
+      srcFolder:
+        type: string
+        default: 'src'
+        description: 'Folder containing the solution and the projects that carry PublicAPI baselines'
+      solutionFile:
+        type: string
+        description: 'Solution file relative to srcFolder'
+      projects:
+        type: string
+        default: ''
+        description: 'Comma-separated exact project names to regenerate. Empty = every project with a PublicAPI folder.'
+      tfmFilter:
+        type: string
+        default: '-ios,-macos,-maccatalyst'
+        description: 'Comma-separated target framework substrings to regenerate'
+      artifactName:
+        type: string
+        default: 'publicapi-baselines'
+        description: 'Name of the uploaded artifact'
+
+permissions:
+  contents: read
+
+jobs:
+  regen:
+    runs-on: macos-latest
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: true
+
+      - name: Restore
+        shell: bash
+        env:
+          SRC_FOLDER: ${{ inputs.srcFolder }}
+          SOLUTION_FILE: ${{ inputs.solutionFile }}
+        run: dotnet restore "$SRC_FOLDER/$SOLUTION_FILE"
+
+      - name: Regenerate baselines
+        shell: bash
+        env:
+          SRC_FOLDER: ${{ inputs.srcFolder }}
+          TFM_FILTER: ${{ inputs.tfmFilter }}
+          PROJECTS: ${{ inputs.projects }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$GITHUB_WORKSPACE/$SRC_FOLDER" "$TFM_FILTER" "$PROJECTS" <<'CS'
+          #:property ManagePackageVersionsCentrally=false
+
+          // Regenerates the PublicApiSharp baselines for every (project, target framework) pair this host can build.
+          //
+          //   dotnet run regen-publicapi.cs -- <src-dir> [tfm-filter] [project-filter]
+          //
+          // The target frameworks a project offers are host-dependent - the Apple ones only appear where the
+          // workload exists - so each host is asked what it can build rather than told. `tfm-filter` narrows that
+          // further: a comma-separated list of substrings, so `-windows,net4` runs only the Windows-side set.
+          // `project-filter` is a comma-separated list of exact project names, for when a type moved and only a
+          // couple of projects need rewriting.
+
+          using System.Diagnostics;
+
+          var srcDir = args.Length > 0 ? args[0] : ".";
+          var filters = args.Length > 1 && args[1].Length > 0
+              ? args[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+              : [];
+          var projectFilters = args.Length > 2 && args[2].Length > 0
+              ? args[2].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+              : [];
+
+          var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST") ?? "dotnet";
+
+          string Run(string arguments, string workingDirectory, out int exitCode)
+          {
+              using var process = Process.Start(new ProcessStartInfo(dotnet, arguments)
+              {
+                  WorkingDirectory = workingDirectory,
+                  RedirectStandardOutput = true,
+                  RedirectStandardError = true,
+              })!;
+
+              var stdout = process.StandardOutput.ReadToEnd();
+              var stderr = process.StandardError.ReadToEnd();
+              process.WaitForExit();
+              exitCode = process.ExitCode;
+              return stdout + stderr;
+          }
+
+          // Only the projects that already carry a baseline directory are tracked; test and sample projects
+          // switch tracking off in their own Directory.Build.props and must not gain a baseline here.
+          var projects = Directory.EnumerateDirectories(srcDir)
+              .Where(d => Directory.Exists(Path.Combine(d, "PublicAPI")))
+              .Select(d => Directory.EnumerateFiles(d, "*.csproj").Single())
+              .Where(p => projectFilters.Length == 0
+                          || projectFilters.Contains(Path.GetFileNameWithoutExtension(p), StringComparer.Ordinal))
+              .OrderBy(p => p, StringComparer.Ordinal)
+              .ToList();
+
+          Console.WriteLine($"projects: {projects.Count}");
+
+          var pairs = new List<(string Project, string Tfm)>();
+          foreach (var project in projects)
+          {
+              var output = Run($"msbuild \"{project}\" -getProperty:TargetFrameworks -nologo", srcDir, out var code);
+              if (code != 0)
+              {
+                  Console.WriteLine($"!! could not evaluate {Path.GetFileName(project)}: {output.Trim()}");
+                  continue;
+              }
+
+              var frameworks = output.Trim().Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+              foreach (var tfm in frameworks)
+              {
+                  if (filters.Length == 0 || filters.Any(f => tfm.Contains(f, StringComparison.Ordinal)))
+                  {
+                      pairs.Add((project, tfm));
+                  }
+              }
+          }
+
+          Console.WriteLine($"pairs to regenerate: {pairs.Count}");
+
+          var failures = new List<string>();
+          var index = 0;
+          foreach (var (project, tfm) in pairs)
+          {
+              index++;
+              var name = Path.GetFileNameWithoutExtension(project);
+              var baseline = Path.Combine(Path.GetDirectoryName(project)!, "PublicAPI", tfm, "PublicAPI.txt");
+
+              // Start from an empty baseline so the surface is rendered from scratch. The fix only adds and
+              // updates entries - a member that has since been removed is PAS0002, which has no fix - so
+              // regenerating in place would leave a stale entry behind and fail the next build.
+              Directory.CreateDirectory(Path.GetDirectoryName(baseline)!);
+              File.WriteAllText(baseline, string.Empty);
+
+              var started = Stopwatch.GetTimestamp();
+              var output = Run(
+                  $"format analyzers \"{project}\" -f {tfm} --diagnostics PAS0001 PAS0003 PAS0004 --severity info -v m",
+                  srcDir,
+                  out var code);
+              var elapsed = Stopwatch.GetElapsedTime(started);
+
+              var wrote = File.Exists(baseline) && new FileInfo(baseline).Length > 0;
+              var status = code == 0 && wrote ? "ok" : "FAIL";
+              Console.WriteLine($"[{index}/{pairs.Count}] {status} {name} {tfm} ({elapsed.TotalSeconds:F0}s)");
+              Console.Out.Flush();
+
+              if (status == "FAIL")
+              {
+                  failures.Add($"{name} {tfm} (exit {code}, baseline {(wrote ? "written" : "empty or missing")})");
+                  if (failures.Count >= 3)
+                  {
+                      Console.WriteLine("giving up after 3 failures");
+                      return 1;
+                  }
+                  var tail = output.Split('\n').Where(l => l.Trim().Length > 0).TakeLast(8);
+                  foreach (var line in tail)
+                  {
+                      Console.WriteLine("    " + line.TrimEnd());
+                  }
+              }
+          }
+
+          Console.WriteLine();
+          Console.WriteLine(failures.Count == 0
+              ? $"ALL {pairs.Count} BASELINES REGENERATED"
+              : $"FAILED {failures.Count} of {pairs.Count}:");
+          foreach (var failure in failures)
+          {
+              Console.WriteLine("  " + failure);
+          }
+
+          return failures.Count == 0 ? 0 : 1;
+          CS
+
+      - name: Upload baselines
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.artifactName }}
+          path: ${{ inputs.srcFolder }}/**/PublicAPI/**/PublicAPI.txt
+          if-no-files-found: error
