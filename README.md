@@ -82,7 +82,7 @@ Actions only when something under `.github` changed. Skipped jobs still pass req
 | `dotnet-environment` | Installs the .NET 8 to 11 SDKs, adds Windows Defender exclusions, restores workloads and sets the version. Set `stamp-version: 'false'` in a job that has no checkout. |
 | `dotnet-build` | Restores and builds with the .NET CLI. |
 | `dotnet-build-uno` | Restores, builds and packs an Uno solution with MSBuild. |
-| `dotnet-test` | Runs the tests on [Microsoft Testing Platform](https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-intro) and uploads coverage and diagnostic logs. |
+| `dotnet-test` | Runs the tests on [Microsoft Testing Platform](https://learn.microsoft.com/en-us/dotnet/core/testing/microsoft-testing-platform-intro) and uploads coverage and diagnostic logs. `test-projects` (`testProjects` on the build and SonarCloud workflows) takes globs that narrow the run to matching projects, with `!` lines to exclude. |
 | `minver` | Reads the version from git tags and exports it for the build. |
 | `compute-version-and-tag` | Works out the next release version from the latest release tag. |
 | `sonarcloud` | Starts a SonarCloud scan before the build and finishes it after the tests. |
