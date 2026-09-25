@@ -130,6 +130,10 @@ on:
         type: string
         default: ''
         description: 'Optional global MTP test timeout (format [h|m|s], e.g. "5m"). Empty = no timeout.'
+      testProjects:
+        type: string
+        default: ''
+        description: 'Optional newline-separated globs, relative to the solution folder, choosing which projects to test (e.g. "tests/**/*.csproj"). A line starting with "!" excludes matches. Empty = every test project in the solution.'
 
       runsOn:
         type: string
@@ -270,6 +274,7 @@ jobs:
           solution-file: ${{ inputs.solutionFile }}
           enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
           test-timeout: ${{ inputs.testTimeout }}
+          test-projects: ${{ inputs.testProjects }}
 
       - name: SonarCloud end
         # A failed build or test still uploads partial analysis.

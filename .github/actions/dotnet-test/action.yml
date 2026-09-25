@@ -22,6 +22,10 @@ inputs:
     description: 'Optional global test timeout passed to MTP --timeout (format [h|m|s], e.g. "5m"). Empty = no timeout. Use to fail fast on hangs instead of letting the CI runner kill the job.'
     required: false
     default: ''
+  test-projects:
+    description: 'Optional newline-separated globs, relative to the solution folder, choosing which of the solution''s projects to test (e.g. "tests/**/*.csproj"). A line starting with "!" excludes matches. Empty = every test project in the solution.'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -41,14 +45,21 @@ runs:
         CONFIGURATION: ${{ inputs.configuration }}
         DETAILED_LOGGING: ${{ inputs.enable-detailed-test-logging }}
         TEST_TIMEOUT: ${{ inputs.test-timeout }}
+        TEST_PROJECTS: ${{ inputs.test-projects }}
       run: |
-        cd "$RUNNER_TEMP" && dotnet run - -- "$SRC_FOLDER" "$SOLUTION_FILE" "$CONFIGURATION" "$DETAILED_LOGGING" "$TEST_TIMEOUT" <<'CS'
+        cd "$RUNNER_TEMP" && dotnet run - -- "$SRC_FOLDER" "$SOLUTION_FILE" "$CONFIGURATION" "$DETAILED_LOGGING" "$TEST_TIMEOUT" "$TEST_PROJECTS" <<'CS'
+        #:package Microsoft.Extensions.FileSystemGlobbing@10.0.12
+
         using System.Diagnostics;
+        using System.Text.Json;
+        using System.Text.RegularExpressions;
+        using System.Xml.Linq;
+        using Microsoft.Extensions.FileSystemGlobbing;
         using static System.Environment;
 
-        if (args is not [var srcFolder, var solutionFile, var configuration, var detailedLogging, var testTimeout])
+        if (args is not [var srcFolder, var solutionFile, var configuration, var detailedLogging, var testTimeout, var testProjects])
         {
-            Console.WriteLine("::error::Expected the source folder, solution file, configuration, detailed logging and test timeout arguments.");
+            Console.WriteLine("::error::Expected the source folder, solution file, configuration, detailed logging, test timeout and test projects arguments.");
             return 2;
         }
 
@@ -60,12 +71,68 @@ runs:
             return 1;
         }
 
-        string[] solution = (solutionFile, Directory.EnumerateFiles(".", "*.slnx").Concat(Directory.EnumerateFiles(".", "*.sln")).FirstOrDefault()) switch
+        string? solutionPath = solutionFile is not ""
+            ? solutionFile
+            : Directory.EnumerateFiles(".", "*.slnx").Concat(Directory.EnumerateFiles(".", "*.sln")).FirstOrDefault();
+        string[] solution = solutionPath is null ? [] : ["--solution", solutionPath];
+
+        string[] patterns = testProjects.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (patterns is not [])
         {
-            (not "", _) => ["--solution", solutionFile],
-            (_, { } found) => ["--solution", found],
-            _ => [],
-        };
+            if (solutionPath is null)
+            {
+                Console.WriteLine("::error::test-projects needs a solution to choose projects from; set solution-file.");
+                return 1;
+            }
+
+            // Match the solution's own project list in memory; nothing is read from disk.
+            Matcher matcher = new(StringComparison.OrdinalIgnoreCase);
+            matcher.AddIncludePatterns(patterns.Where(static p => !p.StartsWith('!')));
+            matcher.AddExcludePatterns(patterns.Where(static p => p.StartsWith('!')).Select(static p => p[1..]));
+
+            string root = Path.GetDirectoryName(Path.GetFullPath(solutionPath))!;
+            Dictionary<string, string> listed = [with(StringComparer.OrdinalIgnoreCase)];
+            foreach (string project in SolutionProjects(solutionPath))
+            {
+                listed[project.Replace('\\', '/')] = project;
+            }
+
+            string[] projects = [.. matcher.Match(root, listed.Keys.Select(path => Path.Combine(root, path))).Files
+                .Select(match => listed[match.Path])];
+
+            if (projects is [])
+            {
+                Console.WriteLine($"::error::No project in {solutionPath} matches test-projects: {string.Join(", ", patterns)}");
+                return 1;
+            }
+
+            // A solution filter keeps dotnet test running the chosen projects in parallel, as it does for the whole solution.
+            string filterPath = Path.Combine(root, "ci-test-projects.slnf");
+            using (FileStream stream = File.Create(filterPath))
+            using (Utf8JsonWriter writer = new(stream, new JsonWriterOptions { Indented = true }))
+            {
+                writer.WriteStartObject();
+                writer.WriteStartObject("solution");
+                writer.WriteString("path", Path.GetFileName(solutionPath));
+                writer.WriteStartArray("projects");
+                foreach (string project in projects)
+                {
+                    writer.WriteStringValue(project);
+                }
+
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+                writer.WriteEndObject();
+            }
+
+            Console.WriteLine($"Testing {projects.Length} project(s) matching test-projects:");
+            foreach (string project in projects)
+            {
+                Console.WriteLine($"  {project}");
+            }
+
+            solution = ["--solution", filterPath];
+        }
 
         // --verbosity is VSTest-only and ignored by MTP. Synchronous writes keep the log when the runner kills a hung test.
         string[] diagnostics = detailedLogging is "true"
@@ -78,6 +145,13 @@ runs:
         return Process.Run(
             "dotnet",
             ["test", .. solution, "--no-build", "--configuration", configuration, .. diagnostics, .. timeout, "--coverage", "--coverage-output-format", "cobertura"]).ExitCode;
+
+        // Project paths as the solution lists them, relative to the solution's folder.
+        static IEnumerable<string> SolutionProjects(string solutionPath) =>
+            solutionPath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
+                ? XDocument.Load(solutionPath).Descendants("Project").Select(static p => (string?)p.Attribute("Path")).OfType<string>()
+                : Regex.Matches(File.ReadAllText(solutionPath), "^Project\\(\"[^\"]*\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+\\.[a-z]+proj)\"", RegexOptions.Multiline | RegexOptions.IgnoreCase)
+                    .Select(static m => m.Groups[1].Value);
         CS
 
     - name: Upload per-OS coverage reports as build artifacts
