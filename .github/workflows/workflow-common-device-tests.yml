@@ -44,16 +44,16 @@ on:
         description: 'Run the iOS leg'
       androidFramework:
         type: string
-        default: 'net11.0-android'
-        description: 'Target framework of the Android head'
+        default: ''
+        description: 'Target framework of the Android head. Empty = the project''s first -android target framework.'
       androidApiLevel:
         type: string
         default: '36'
         description: 'Android API level of the emulator system image'
       iosFramework:
         type: string
-        default: 'net11.0-ios'
-        description: 'Target framework of the iOS head'
+        default: ''
+        description: 'Target framework of the iOS head. Empty = the project''s first -ios target framework.'
       iosDeviceType:
         type: string
         default: ''

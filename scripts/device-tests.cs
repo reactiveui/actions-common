@@ -12,7 +12,7 @@
 //
 // An option given an empty value takes its default.
 //   --configuration <name>    Build configuration. Default: Debug.
-//   --framework <tfm>         Target framework. Default: net11.0-android or net11.0-ios.
+//   --framework <tfm>         Target framework. Default: the project's first -android or -ios target framework.
 //   --results <dir>           Folder for the TRX report, logs and exit code. Default: ./device-test-results/<platform>.
 //   --timeout <minutes>       Time allowed for the test run. Default: 30.
 //   --keep                    Leave the emulator or simulator running afterwards.
@@ -205,11 +205,17 @@ internal static class Android
                 _ = Adb(adb, serial, "shell", "settings", "put", "global", setting, "0");
             }
 
-            var framework = options.Get("framework") ?? "net11.0-android";
             var configuration = options.Get("configuration") ?? "Debug";
             var exitCode = 0;
             foreach (var (project, projectResults) in targets)
             {
+                if ((options.Get("framework") ?? Frameworks.Find(project, "android")) is not { } framework)
+                {
+                    Console.WriteLine($"::error::{Path.GetFileName(project)} has no Android target framework. Pass --framework.");
+                    exitCode = exitCode is 0 ? 2 : exitCode;
+                    continue;
+                }
+
                 _ = Adb(adb, serial, "logcat", "-c");
 
                 // dotnet test reads the test runner from the global.json above the project.
@@ -405,7 +411,12 @@ internal static class Apple
     private static int RunApp(string udid, Target target, Options options)
     {
         var (project, results) = target;
-        var framework = options.Get("framework") ?? "net11.0-ios";
+        if ((options.Get("framework") ?? Frameworks.Find(project, "ios")) is not { } framework)
+        {
+            Console.WriteLine($"::error::{Path.GetFileName(project)} has no iOS target framework. Pass --framework.");
+            return 2;
+        }
+
         var configuration = options.Get("configuration") ?? "Debug";
         var rid = RuntimeInformation.OSArchitecture is Architecture.Arm64 ? "iossimulator-arm64" : "iossimulator-x64";
         string[] buildProperties = [$"-p:TargetFramework={framework}", $"-p:Configuration={configuration}", $"-p:RuntimeIdentifier={rid}"];
@@ -492,6 +503,18 @@ internal static class Apple
         _ = Process.Run("xcrun", ["simctl", "delete", udid], silent: true);
         Console.WriteLine($"Deleted simulator {udid}");
     }
+}
+
+/// <summary>Finds a project's target framework for a platform.</summary>
+internal static class Frameworks
+{
+    /// <summary>Returns the project's first target framework for <paramref name="platform"/>, such as <c>net11.0-android37</c>.</summary>
+    public static string? Find(string project, string platform) =>
+        Process.RunAndCaptureText("dotnet", ["msbuild", project, "-getProperty:TargetFrameworks", "-getProperty:TargetFramework", "-nologo"]) is { ExitStatus.ExitCode: 0, StandardOutput: var output }
+            ? JsonDocument.Parse(output).RootElement.GetProperty("Properties").EnumerateObject()
+                .SelectMany(static p => (p.Value.GetString() ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .FirstOrDefault(tfm => tfm.Contains($"-{platform}", StringComparison.OrdinalIgnoreCase))
+            : null;
 }
 
 /// <summary>The <c>--name value</c> and <c>--flag</c> options after the platform.</summary>
