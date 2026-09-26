@@ -497,7 +497,11 @@ internal static class Apple
             return build.ExitCode;
         }
 
-        var appBundle = Property(project, buildProperties, "AppBundleDir");
+        // AppBundleDir is set by a build target, so evaluation alone often returns nothing; fall back to the one
+        // .app folder the build left in the output path, which evaluation does know.
+        var appBundle = Property(project, buildProperties, "AppBundleDir") is { Length: > 0 } bundleDir
+            ? Path.GetFullPath(bundleDir, Path.GetDirectoryName(project)!)
+            : FindAppBundle(project, Property(project, buildProperties, "OutputPath"));
         var bundleId = Property(project, buildProperties, "ApplicationId");
         if (appBundle is null || bundleId is null || !Directory.Exists(appBundle))
         {
@@ -559,6 +563,20 @@ internal static class Apple
     private static string? Property(string project, string[] buildProperties, string property) =>
         Process.RunAndCaptureText("dotnet", ["msbuild", project, $"-getProperty:{property}", .. buildProperties, "-nologo"])
             is { ExitStatus.ExitCode: 0, StandardOutput: var value } && value.Trim() is { Length: > 0 } trimmed ? trimmed : null;
+
+    // The build writes exactly one .app folder into the project's output path for a simulator runtime identifier.
+    private static string? FindAppBundle(string project, string? outputPath)
+    {
+        if (outputPath is null)
+        {
+            return null;
+        }
+
+        var directory = Path.GetFullPath(outputPath, Path.GetDirectoryName(Path.GetFullPath(project))!);
+        return Directory.Exists(directory)
+            ? Directory.EnumerateDirectories(directory, "*.app", SearchOption.TopDirectoryOnly).SingleOrDefault()
+            : null;
+    }
 
     private static void Shutdown(string udid, Options options)
     {
