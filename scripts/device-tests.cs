@@ -549,6 +549,7 @@ internal static class Apple
         if (!File.Exists(exitCodeFile) || !int.TryParse(File.ReadAllText(exitCodeFile).Trim(), CultureInfo.InvariantCulture, out var exitCode))
         {
             Console.WriteLine($"::error::{Path.GetFileName(project)} ended without writing its exit code, so it crashed. See console.log and simulator.log in {results}.");
+            ReportCrash(Path.GetFileName(project), run.StandardOutput + run.StandardError, log.StandardOutput);
             return 5;
         }
 
@@ -558,6 +559,44 @@ internal static class Apple
         }
 
         return exitCode;
+    }
+
+    // Lines that start a crash report: the .NET runtime's fatal error and unhandled exception blocks, and UIKit's
+    // uncaught Objective-C exception.
+    private static readonly string[] CrashMarkers =
+        ["Fatal error.", "Unhandled exception", "Got a SIG", "Terminating app due to uncaught exception", "[ERROR]"];
+
+    // Prints where a crashed app got to and the crash itself as one annotation, so the job summary shows the cause
+    // without opening the artifact.
+    private static void ReportCrash(string app, string console, string simulatorLog)
+    {
+        var lines = console.Split('\n', StringSplitOptions.TrimEntries);
+        var passed = lines.Count(static line => line.Contains("[PASSED]", StringComparison.Ordinal));
+        var failed = lines.Count(static line => line.Contains("[FAILED]", StringComparison.Ordinal));
+        var lastResult = lines.LastOrDefault(static line => line.Contains("[PASSED]", StringComparison.Ordinal) || line.Contains("[FAILED]", StringComparison.Ordinal) || line.Contains("[SKIPPED]", StringComparison.Ordinal));
+        Console.WriteLine($"{app} reported {passed} passed and {failed} failed tests before it ended.");
+        if (lastResult is not null)
+        {
+            Console.WriteLine($"Last finished test: {lastResult}");
+        }
+
+        var crash = FindCrash(lines) ?? FindCrash(simulatorLog.Split('\n', StringSplitOptions.TrimEntries));
+        if (crash is null)
+        {
+            Console.WriteLine($"::error::{app} left no crash report in its console or the simulator log.");
+            return;
+        }
+
+        Console.WriteLine($"::error title={app} crashed::{Escape(string.Join('\n', crash))}");
+
+        static string[]? FindCrash(string[] lines)
+        {
+            var start = Array.FindIndex(lines, static line => CrashMarkers.Any(marker => line.Contains(marker, StringComparison.Ordinal)));
+            return start < 0 ? null : lines[start..Math.Min(lines.Length, start + 25)];
+        }
+
+        static string Escape(string text) =>
+            text.Replace("%", "%25", StringComparison.Ordinal).Replace("\r", "%0D", StringComparison.Ordinal).Replace("\n", "%0A", StringComparison.Ordinal);
     }
 
     private static string? Property(string project, string[] buildProperties, string property) =>
