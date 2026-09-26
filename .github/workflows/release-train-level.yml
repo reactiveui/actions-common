@@ -1,0 +1,921 @@
+name: Release train level
+
+# release-train.yml calls this once per level. Each repository in the level runs as one matrix job.
+on:
+  workflow_call:
+    inputs:
+      level:
+        type: number
+        required: true
+        description: 'Level number. Level 0 has no earlier results to read.'
+
+      repositories:
+        type: string
+        required: true
+        description: 'JSON list of the repositories in this level, from the plan job.'
+
+      settings:
+        type: string
+        required: true
+        description: 'JSON settings from the plan job.'
+
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID:
+        required: true
+        description: 'Client ID of the GitHub App that opens pull requests, merges them and starts release workflows.'
+
+      RELEASE_TRAIN_APP_PRIVATE_KEY:
+        required: true
+        description: 'Private key (.pem contents) of that GitHub App.'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: ${{ matrix.repository.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    # A cancelled release can leave packages half published, so a failure never cancels the other repositories in the level.
+    strategy:
+      fail-fast: false
+      matrix:
+        repository: ${{ fromJSON(inputs.repositories) }}
+    env:
+      ENTRY: ${{ toJSON(matrix.repository) }}
+    steps:
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
+
+      - name: Download earlier results
+        if: inputs.level > 0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: train-result-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/train-results
+
+      # Any later failure leaves the pull request open so you can fix it and resume the train from this repository.
+      - name: Update dependencies
+        id: update
+        shell: bash
+        env:
+          APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+          SETTINGS: ${{ inputs.settings }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$ENTRY" "$SETTINGS" "$RUNNER_TEMP/train-results" "$RUNNER_TEMP/train" <<'CS'
+          using System.Buffers.Text;
+          using System.Diagnostics;
+          using System.Globalization;
+          using System.Security.Cryptography;
+          using System.Text;
+          using System.Text.Json.Nodes;
+          using System.Text.RegularExpressions;
+          using static System.Environment;
+
+          if (args is not [var entryJson, var settingsJson, var resultsDir, var workDir])
+          {
+              Console.WriteLine("::error::Expected the repository entry, settings, results folder and work folder arguments.");
+              return 2;
+          }
+
+          var entry = JsonNode.Parse(entryJson)!.AsObject();
+          var settings = JsonNode.Parse(settingsJson)!.AsObject();
+          var name = entry["name"]!.GetValue<string>();
+          var repository = entry["repository"]!.GetValue<string>();
+          var branch = entry["branch"]!.GetValue<string>();
+          var updateBranch = settings["updateBranch"]!.GetValue<string>();
+          var outputs = GetEnvironmentVariable("GITHUB_OUTPUT")!;
+          AppToken.Repository = repository;
+          Directory.CreateDirectory(workDir);
+
+          Dictionary<string, JsonObject> results = [with(StringComparer.OrdinalIgnoreCase)];
+          if (Directory.Exists(resultsDir))
+          {
+              foreach (var file in Directory.GetFiles(resultsDir, "*.json"))
+              {
+                  var result = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+                  results[result["name"]!.GetValue<string>()] = result;
+              }
+          }
+
+          var unreleased = entry["waitsFor"]!.AsArray()
+              .Select(node => node!.GetValue<string>())
+              .Where(upstream => results.GetValueOrDefault(upstream)?["status"]?.GetValue<string>() is not "released")
+              .ToList();
+          if (unreleased.Count > 0)
+          {
+              var reason = $"Blocked because {string.Join(", ", unreleased)} did not release in this run.";
+              Console.WriteLine($"::warning::{reason}");
+              File.AppendAllLines(outputs, ["blocked=true", $"reason={reason}"]);
+              return 0;
+          }
+
+          // Every other repository in the config supplies its packages: this run's release when it has one, else its latest release.
+          HashSet<string> ignored = [with(StringComparer.OrdinalIgnoreCase), .. entry["ignorePackages"]!.AsArray().Select(node => node!.GetValue<string>())];
+          Dictionary<string, (string Id, string Version, string Source)> packages = [with(StringComparer.OrdinalIgnoreCase)];
+          foreach (var source in settings["catalog"]!.AsArray().Select(node => node!.AsObject()))
+          {
+              var sourceName = source["name"]!.GetValue<string>();
+              if (sourceName.Equals(name, StringComparison.OrdinalIgnoreCase))
+              {
+                  continue;
+              }
+
+              if (results.GetValueOrDefault(sourceName) is { } result && result["status"]?.GetValue<string>() is "released")
+              {
+                  foreach (var id in result["packages"]!.AsArray().Select(node => node!.GetValue<string>()))
+                  {
+                      packages[id] = (id, result["version"]!.GetValue<string>(), $"{sourceName} (this run)");
+                  }
+
+                  continue;
+              }
+
+              var sourceRepository = source["repository"]!.GetValue<string>();
+              if (Gh("api", $"repos/{sourceRepository}/releases/latest") is not { ExitStatus.ExitCode: 0, StandardOutput: var latestJson })
+              {
+                  Console.WriteLine($"{sourceRepository} has no latest release. Its packages stay as they are.");
+                  continue;
+              }
+
+              var latest = JsonNode.Parse(latestJson)!.AsObject();
+              if (ReleasePackages(latest) is ({ } version, var ids))
+              {
+                  foreach (var id in ids)
+                  {
+                      packages[id] = (id, version, $"{sourceName} (latest release)");
+                  }
+              }
+          }
+
+          foreach (var id in ignored)
+          {
+              packages.Remove(id);
+          }
+
+          if (Gh("auth", "setup-git") is { ExitStatus.ExitCode: not 0 } setup)
+          {
+              Console.WriteLine($"::error::Could not set up git credentials: {setup.StandardError.Trim()}");
+              return 1;
+          }
+
+          var pullRequests = Gh("pr", "list", "--repo", repository, "--head", updateBranch, "--base", branch, "--state", "open", "--json", "number,url");
+          if (pullRequests is not { ExitStatus.ExitCode: 0 })
+          {
+              Console.WriteLine($"::error::Could not list pull requests in {repository}: {pullRequests.StandardError.Trim()}");
+              return 1;
+          }
+
+          var openPullRequest = JsonNode.Parse(pullRequests.StandardOutput)!.AsArray().FirstOrDefault()?.AsObject();
+          var clone = Path.Combine(workDir, "repository");
+          var cloneBranch = openPullRequest is null ? branch : updateBranch;
+          AppToken.Refresh();
+          if (Process.Run("git", ["clone", "--depth", "1", "--branch", cloneBranch, $"https://github.com/{repository}.git", clone]) is { ExitCode: not 0 } cloned)
+          {
+              Console.WriteLine($"::error::Could not clone {repository} at {cloneBranch}.");
+              return cloned.ExitCode;
+          }
+
+          Directory.SetCurrentDirectory(clone);
+          if (Git("ls-files", "-z", "--", "*.props", "*.targets", "*.csproj", "*.fsproj", "*.vbproj") is not { ExitStatus.ExitCode: 0, StandardOutput: var listed })
+          {
+              Console.WriteLine("::error::Could not list the project files.");
+              return 1;
+          }
+
+          var files = listed.Split('\0', StringSplitOptions.RemoveEmptyEntries);
+          var texts = files.ToDictionary(file => file, file => File.ReadAllText(file), StringComparer.Ordinal);
+          JsonArray updates = [];
+          List<string> notes = [];
+          Dictionary<string, (string Version, string Id)> properties = [with(StringComparer.Ordinal)];
+
+          var item = new Regex(@"<(?:PackageVersion|PackageReference|GlobalPackageReference)\b[^>]*>", RegexOptions.CultureInvariant);
+          var include = new Regex(@"\b(?:Include|Update)\s*=\s*""([^""]+)""", RegexOptions.CultureInvariant);
+          var versionAttribute = new Regex(@"\b(Version|VersionOverride)(\s*=\s*"")([^""]*)("")", RegexOptions.CultureInvariant);
+          var propertyReference = new Regex(@"^\$\(([A-Za-z_][A-Za-z0-9_.-]*)\)$", RegexOptions.CultureInvariant);
+
+          foreach (var file in files)
+          {
+              texts[file] = item.Replace(texts[file], element =>
+              {
+                  if (include.Match(element.Value) is not { Success: true } match || !packages.TryGetValue(match.Groups[1].Value, out var package))
+                  {
+                      return element.Value;
+                  }
+
+                  return versionAttribute.Replace(element.Value, attribute =>
+                  {
+                      var current = attribute.Groups[3].Value;
+                      if (propertyReference.Match(current) is { Success: true } reference)
+                      {
+                          var property = reference.Groups[1].Value;
+                          if (properties.TryGetValue(property, out var claimed) && claimed.Version is not "" && claimed.Version != package.Version)
+                          {
+                              notes.Add($"`$({property})` serves {claimed.Id} {claimed.Version} and {package.Id} {package.Version}. It was left alone.");
+                              properties[property] = ("", claimed.Id);
+                          }
+                          else if (!properties.ContainsKey(property))
+                          {
+                              properties[property] = (package.Version, package.Id);
+                          }
+
+                          return attribute.Value;
+                      }
+
+                      if (!ShouldUpdate(current, package.Version, $"{package.Id} in {file}", notes))
+                      {
+                          return attribute.Value;
+                      }
+
+                      updates.Add((JsonNode)Update(file, package.Id, current, package.Version, package.Source));
+                      return $"{attribute.Groups[1].Value}{attribute.Groups[2].Value}{package.Version}{attribute.Groups[4].Value}";
+                  });
+              });
+          }
+
+          foreach (var (property, (version, id)) in properties.Where(pair => pair.Value.Version is not ""))
+          {
+              var definition = new Regex($@"(<{Regex.Escape(property)}(?:\s[^>]*)?>)([^<]*)(</{Regex.Escape(property)}>)", RegexOptions.CultureInvariant);
+              foreach (var file in files)
+              {
+                  texts[file] = definition.Replace(texts[file], match =>
+                  {
+                      var current = match.Groups[2].Value.Trim();
+                      if (!ShouldUpdate(current, version, $"$({property}) in {file}", notes))
+                      {
+                          return match.Value;
+                      }
+
+                      updates.Add((JsonNode)Update(file, $"$({property})", current, version, packages[id].Source));
+                      return $"{match.Groups[1].Value}{version}{match.Groups[3].Value}";
+                  });
+              }
+          }
+
+          foreach (var file in files)
+          {
+              var bytes = File.ReadAllBytes(file);
+              var bom = bytes is [0xEF, 0xBB, 0xBF, ..];
+              var original = new UTF8Encoding(bom).GetString(bom ? bytes[3..] : bytes);
+              if (!string.Equals(original, texts[file], StringComparison.Ordinal))
+              {
+                  File.WriteAllText(file, texts[file], new UTF8Encoding(bom));
+              }
+          }
+
+          foreach (var note in notes)
+          {
+              Console.WriteLine($"::notice::{name}: {note}");
+          }
+
+          File.WriteAllText(Path.Combine(workDir, "updates.json"), new JsonObject { ["updates"] = updates, ["notes"] = new JsonArray([.. notes.Select(note => (JsonNode?)JsonValue.Create(note))]) }.ToJsonString());
+          Console.WriteLine($"{updates.Count} version(s) to update in {repository}.");
+          if (updates.Count is 0 && openPullRequest is null)
+          {
+              File.AppendAllLines(outputs, ["blocked=false", "changed=false"]);
+              return 0;
+          }
+
+          StringBuilder table = new();
+          table.AppendLine("| File | Package or property | From | To | Source |").AppendLine("|---|---|---|---|---|");
+          foreach (var update in updates)
+          {
+              table.AppendLine(CultureInfo.InvariantCulture, $"| `{update!["file"]}` | `{update["item"]}` | {update["from"]} | {update["to"]} | {update["source"]} |");
+          }
+
+          if (updates.Count > 0)
+          {
+              var bot = $"{AppToken.Slug()}[bot]";
+              var botId = Gh("api", $"users/{bot}", "--jq", ".id").StandardOutput.Trim();
+              string[] identity = ["-c", $"user.name={bot}", "-c", $"user.email={botId}+{bot}@users.noreply.github.com"];
+              var message = $"chore(deps): update {updates.Select(update => update!["item"]!.GetValue<string>()).Distinct(StringComparer.Ordinal).Count()} ReactiveUI package version(s)";
+              if (Process.Run("git", [.. identity, "commit", "--all", "--message", message, "--message", $"Release train run {GetEnvironmentVariable("GITHUB_SERVER_URL")}/{GetEnvironmentVariable("GITHUB_REPOSITORY")}/actions/runs/{GetEnvironmentVariable("GITHUB_RUN_ID")}"]) is { ExitCode: not 0 } committed)
+              {
+                  Console.WriteLine("::error::Could not commit the version updates.");
+                  return committed.ExitCode;
+              }
+
+              // A new branch starts from the base branch, so it replaces any stale branch left by a closed pull request.
+              string[] push = openPullRequest is null ? ["push", "--force", "origin", $"HEAD:refs/heads/{updateBranch}"] : ["push", "origin", $"HEAD:refs/heads/{updateBranch}"];
+              AppToken.Refresh();
+              if (Process.Run("git", push) is { ExitCode: not 0 } pushed)
+              {
+                  Console.WriteLine($"::error::Could not push {updateBranch} to {repository}.");
+                  return pushed.ExitCode;
+              }
+          }
+
+          var runUrl = $"{GetEnvironmentVariable("GITHUB_SERVER_URL")}/{GetEnvironmentVariable("GITHUB_REPOSITORY")}/actions/runs/{GetEnvironmentVariable("GITHUB_RUN_ID")}";
+          var body = Path.Combine(workDir, "pull-request.md");
+          File.WriteAllText(body, $"The [release train]({runUrl}) updates these package versions before it releases {name}.\n\n{table}");
+          string pullRequest;
+          if (openPullRequest is null)
+          {
+              if (Gh("pr", "create", "--repo", repository, "--base", branch, "--head", updateBranch, "--title", "chore(deps): update ReactiveUI package versions", "--body-file", body) is not { ExitStatus.ExitCode: 0, StandardOutput: var created })
+              {
+                  Console.WriteLine($"::error::Could not open a pull request in {repository}.");
+                  return 1;
+              }
+
+              pullRequest = created.Trim();
+          }
+          else
+          {
+              pullRequest = openPullRequest["url"]!.GetValue<string>();
+              if (updates.Count > 0)
+              {
+                  Gh("pr", "comment", pullRequest, "--body-file", body);
+              }
+          }
+
+          File.AppendAllLines(outputs, ["blocked=false", "changed=true", $"pull-request={pullRequest}"]);
+          Console.WriteLine($"Waiting for the checks on {pullRequest}");
+
+          string[] merge = ["pr", "merge", pullRequest, "--squash", "--delete-branch", .. entry["adminMerge"]!.GetValue<bool>() ? ["--admin"] : Array.Empty<string>()];
+          var deadline = DateTime.UtcNow.AddMinutes(settings["checksMinutes"]!.GetValue<int>());
+          var started = DateTime.UtcNow;
+          while (DateTime.UtcNow < deadline)
+          {
+              Thread.Sleep(TimeSpan.FromSeconds(30));
+
+              // Required checks decide the merge. A repository with no required checks waits for every check instead.
+              var checks = Checks(pullRequest, required: true);
+              if (checks.Count is 0 && DateTime.UtcNow - started > TimeSpan.FromMinutes(3))
+              {
+                  checks = Checks(pullRequest, required: false);
+              }
+
+              if (checks.Count is 0)
+              {
+                  continue;
+              }
+
+              if (checks.Where(check => check.Bucket is "fail" or "cancel").Select(check => check.Name).ToList() is { Count: > 0 } failed)
+              {
+                  Console.WriteLine($"::error::Checks failed on {pullRequest}: {string.Join(", ", failed)}. Fix the pull request, merge it, then resume the train from {name}.");
+                  return 1;
+              }
+
+              if (checks.Any(check => check.Bucket is "pending"))
+              {
+                  continue;
+              }
+
+              // Branch protection rejects the merge while a required check has not reported yet, so a failed merge waits again.
+              if (Gh(merge) is { ExitStatus.ExitCode: not 0 } merged)
+              {
+                  Console.WriteLine($"Merge not possible yet: {merged.StandardError.Trim()}");
+                  continue;
+              }
+
+              Console.WriteLine($"Merged {pullRequest}");
+              return 0;
+          }
+
+          Console.WriteLine($"::error::{pullRequest} did not pass its checks within {settings["checksMinutes"]} minutes.");
+          return 1;
+
+          static ProcessTextOutput Gh(params IEnumerable<string> arguments)
+          {
+              AppToken.Refresh();
+              return Process.RunAndCaptureText("gh", arguments);
+          }
+
+          static ProcessTextOutput Git(params IEnumerable<string> arguments) => Process.RunAndCaptureText("git", arguments);
+
+          static List<(string Name, string Bucket)> Checks(string pullRequest, bool required)
+          {
+              var output = Gh(["pr", "checks", pullRequest, "--json", "name,bucket", .. required ? ["--required"] : Array.Empty<string>()]);
+              return output.StandardOutput.TrimStart().StartsWith('[')
+                  ? [.. JsonNode.Parse(output.StandardOutput)!.AsArray().Select(check => (check!["name"]!.GetValue<string>(), check["bucket"]!.GetValue<string>()))]
+                  : [];
+          }
+
+          static (string? Version, List<string> Ids) ReleasePackages(JsonObject release)
+          {
+              var assets = release["assets"]!.AsArray().Select(asset => asset!["name"]!.GetValue<string>()).Where(asset => asset.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase)).ToList();
+              var tag = release["tag_name"]!.GetValue<string>();
+              string[] candidates = [release["name"]?.GetValue<string>() ?? "", tag, tag.TrimStart('v')];
+              foreach (var version in candidates.Where(candidate => candidate is not ""))
+              {
+                  var suffix = $".{version}.nupkg";
+                  if (assets.Where(asset => asset.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)).Select(asset => asset[..^suffix.Length]).ToList() is { Count: > 0 } ids)
+                  {
+                      return (version, ids);
+                  }
+              }
+
+              return (null, []);
+          }
+
+          static JsonObject Update(string file, string item, string from, string to, string source) => new()
+          {
+              ["file"] = file,
+              ["item"] = item,
+              ["from"] = from,
+              ["to"] = to,
+              ["source"] = source,
+          };
+
+          static bool ShouldUpdate(string current, string next, string where, List<string> notes)
+          {
+              if (current == next)
+              {
+                  return false;
+              }
+
+              if (SemanticVersion.TryParse(current) is not { } from)
+              {
+                  notes.Add($"{where} uses `{current}`, which is not a plain version. It was left alone.");
+                  return false;
+              }
+
+              if (SemanticVersion.TryParse(next) is { } to && to.CompareTo(from) < 0)
+              {
+                  notes.Add($"{where} pins {current}, which is newer than {next}. It was left alone.");
+                  return false;
+              }
+
+              return true;
+          }
+
+          internal sealed record SemanticVersion(long[] Core, string[] PreRelease) : IComparable<SemanticVersion>
+          {
+              public static SemanticVersion? TryParse(string text)
+              {
+                  if (!Regex.IsMatch(text, @"^\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$", RegexOptions.CultureInvariant))
+                  {
+                      return null;
+                  }
+
+                  var withoutMetadata = text.Split('+')[0];
+                  var dash = withoutMetadata.IndexOf('-', StringComparison.Ordinal);
+                  var core = dash < 0 ? withoutMetadata : withoutMetadata[..dash];
+                  return new(
+                      [.. core.Split('.').Select(part => long.Parse(part, CultureInfo.InvariantCulture))],
+                      dash < 0 ? [] : withoutMetadata[(dash + 1)..].Split('.'));
+              }
+
+              public int CompareTo(SemanticVersion? other)
+              {
+                  for (var index = 0; index < Math.Max(Core.Length, other!.Core.Length); index++)
+                  {
+                      var compared = Core.ElementAtOrDefault(index).CompareTo(other.Core.ElementAtOrDefault(index));
+                      if (compared is not 0)
+                      {
+                          return compared;
+                      }
+                  }
+
+                  switch (PreRelease.Length, other.PreRelease.Length)
+                  {
+                      case (0, 0):
+                          return 0;
+                      case (0, _):
+                          return 1;
+                      case (_, 0):
+                          return -1;
+                  }
+
+                  for (var index = 0; index < Math.Min(PreRelease.Length, other.PreRelease.Length); index++)
+                  {
+                      var (left, right) = (PreRelease[index], other.PreRelease[index]);
+                      var compared = (long.TryParse(left, CultureInfo.InvariantCulture, out var leftNumber), long.TryParse(right, CultureInfo.InvariantCulture, out var rightNumber)) switch
+                      {
+                          (true, true) => leftNumber.CompareTo(rightNumber),
+                          (true, false) => -1,
+                          (false, true) => 1,
+                          _ => string.CompareOrdinal(left, right),
+                      };
+
+                      if (compared is not 0)
+                      {
+                          return compared;
+                      }
+                  }
+
+                  return PreRelease.Length.CompareTo(other.PreRelease.Length);
+              }
+          }
+
+          // Installation tokens last an hour and the waits here last longer, so every gh or git call refreshes the token first.
+          internal static class AppToken
+          {
+              private static DateTimeOffset expires;
+
+              public static string Repository { get; set; } = "";
+
+              public static void Refresh()
+              {
+                  if (expires - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(10))
+                  {
+                      return;
+                  }
+
+                  using var http = Client(Jwt());
+                  var installation = JsonNode.Parse(http.GetStringAsync($"repos/{Repository}/installation").GetAwaiter().GetResult())!["id"]!.GetValue<long>();
+                  using var response = http.PostAsync($"app/installations/{installation}/access_tokens", null).GetAwaiter().GetResult();
+                  var body = JsonNode.Parse(response.EnsureSuccessStatusCode().Content.ReadAsStringAsync().GetAwaiter().GetResult())!;
+                  var token = body["token"]!.GetValue<string>();
+                  Console.WriteLine($"::add-mask::{token}");
+                  Environment.SetEnvironmentVariable("GH_TOKEN", token);
+                  expires = body["expires_at"]!.GetValue<DateTimeOffset>();
+              }
+
+              public static bool IsInstalled(string repository)
+              {
+                  using var http = Client(Jwt());
+                  using var response = http.GetAsync($"repos/{repository}/installation").GetAwaiter().GetResult();
+                  return response.IsSuccessStatusCode;
+              }
+
+              public static string Slug()
+              {
+                  using var http = Client(Jwt());
+                  return JsonNode.Parse(http.GetStringAsync("app").GetAwaiter().GetResult())!["slug"]!.GetValue<string>();
+              }
+
+              private static HttpClient Client(string jwt)
+              {
+                  HttpClient http = new() { BaseAddress = new("https://api.github.com/") };
+                  http.DefaultRequestHeaders.Authorization = new("Bearer", jwt);
+                  http.DefaultRequestHeaders.UserAgent.ParseAdd("reactiveui-release-train");
+                  http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+                  return http;
+              }
+
+              private static string Jwt()
+              {
+                  using var rsa = RSA.Create();
+                  rsa.ImportFromPem(Environment.GetEnvironmentVariable("APP_PRIVATE_KEY"));
+                  var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                  var claims = $"{{\"iat\":{now - 60},\"exp\":{now + 540},\"iss\":\"{Environment.GetEnvironmentVariable("APP_CLIENT_ID")}\"}}";
+                  var unsigned = $"{Base64Url.EncodeToString("{\"alg\":\"RS256\",\"typ\":\"JWT\"}"u8)}.{Base64Url.EncodeToString(Encoding.UTF8.GetBytes(claims))}";
+                  return $"{unsigned}.{Base64Url.EncodeToString(rsa.SignData(Encoding.ASCII.GetBytes(unsigned), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))}";
+              }
+          }
+          CS
+
+      - name: Release
+        id: release
+        if: steps.update.outputs.blocked != 'true'
+        shell: bash
+        env:
+          APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+          TIMEOUT_MINUTES: ${{ fromJSON(inputs.settings).releaseMinutes }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$ENTRY" "$TIMEOUT_MINUTES" "$RUNNER_TEMP/train" <<'CS'
+          using System.Buffers.Text;
+          using System.Diagnostics;
+          using System.Globalization;
+          using System.Security.Cryptography;
+          using System.Text;
+          using System.Text.Json.Nodes;
+          using System.Text.RegularExpressions;
+          using static System.Environment;
+
+          if (args is not [var entryJson, var timeoutMinutes, var workDir])
+          {
+              Console.WriteLine("::error::Expected the repository entry, timeout and work folder arguments.");
+              return 2;
+          }
+
+          var entry = JsonNode.Parse(entryJson)!.AsObject();
+          var repository = entry["repository"]!.GetValue<string>();
+          var workflow = entry["workflow"]!.GetValue<string>();
+          var branch = entry["branch"]!.GetValue<string>();
+          var outputs = GetEnvironmentVariable("GITHUB_OUTPUT")!;
+          AppToken.Repository = repository;
+          var deadline = DateTime.UtcNow.AddMinutes(int.Parse(timeoutMinutes, CultureInfo.InvariantCulture));
+          var dispatched = DateTime.UtcNow.AddSeconds(-10);
+          Directory.CreateDirectory(workDir);
+
+          // A branch whose head is already the latest release has nothing new to ship, so the train reuses that release.
+          if (Gh("api", $"repos/{repository}/commits/{branch}", "--jq", ".sha") is not { ExitStatus.ExitCode: 0, StandardOutput: var headOutput })
+          {
+              Console.WriteLine($"::error::Could not read the head of {branch} in {repository}.");
+              return 1;
+          }
+
+          var branchHead = headOutput.Trim();
+          if (Releases().FirstOrDefault() is { } newest && newest["target_commitish"]?.GetValue<string>() == branchHead)
+          {
+              Console.WriteLine($"{repository} already released {newest["tag_name"]} at {branchHead}. Reusing it.");
+              File.AppendAllLines(outputs, ["reused=true"]);
+              return WriteRelease(newest, runUrl: null);
+          }
+
+          string[] fields = [.. entry["inputs"]!.AsObject().SelectMany(input => new[] { "--raw-field", $"{input.Key}={input.Value!.GetValue<string>()}" })];
+          var dispatch = Gh(["workflow", "run", workflow, "--repo", repository, "--ref", branch, .. fields]);
+          if (dispatch is { ExitStatus.ExitCode: not 0 })
+          {
+              Console.WriteLine($"::error::Could not start {workflow} in {repository}: {dispatch.StandardError.Trim()}");
+              return 1;
+          }
+
+          Console.Write(dispatch.StandardOutput);
+          var runId = Regex.Match(dispatch.StandardOutput + dispatch.StandardError, @"/actions/runs/(\d+)", RegexOptions.CultureInvariant) is { Success: true } link ? link.Groups[1].Value : null;
+          for (var attempt = 0; runId is null && attempt < 12; attempt++)
+          {
+              Thread.Sleep(TimeSpan.FromSeconds(10));
+              var runs = Gh("run", "list", "--repo", repository, "--workflow", workflow, "--branch", branch, "--event", "workflow_dispatch", "--limit", "10", "--json", "databaseId,createdAt");
+              runId = JsonNode.Parse(runs.StandardOutput is "" ? "[]" : runs.StandardOutput)!.AsArray()
+                  .Where(run => run!["createdAt"]!.GetValue<DateTime>().ToUniversalTime() >= dispatched)
+                  .Select(run => run!["databaseId"]!.GetValue<long>().ToString(CultureInfo.InvariantCulture))
+                  .LastOrDefault();
+          }
+
+          if (runId is null)
+          {
+              Console.WriteLine($"::error::{workflow} in {repository} started, but its run could not be found.");
+              return 1;
+          }
+
+          var runUrl = $"https://github.com/{repository}/actions/runs/{runId}";
+          File.AppendAllLines(outputs, [$"run-url={runUrl}"]);
+          Console.WriteLine($"Waiting for {runUrl}");
+
+          JsonObject run;
+          while (true)
+          {
+              Thread.Sleep(TimeSpan.FromSeconds(60));
+              if (Gh("run", "view", runId, "--repo", repository, "--json", "status,conclusion,headSha") is { ExitStatus.ExitCode: 0, StandardOutput: var view }
+                  && JsonNode.Parse(view)!.AsObject() is { } current
+                  && current["status"]!.GetValue<string>() is "completed")
+              {
+                  run = current;
+                  break;
+              }
+
+              if (DateTime.UtcNow > deadline)
+              {
+                  Console.WriteLine($"::error::{runUrl} did not finish within {timeoutMinutes} minutes.");
+                  return 1;
+              }
+          }
+
+          if (run["conclusion"]!.GetValue<string>() is not "success" and var conclusion)
+          {
+              Console.WriteLine($"::error::The release run ended with {conclusion}: {runUrl}");
+              return 1;
+          }
+
+          var headSha = run["headSha"]!.GetValue<string>();
+          var releases = Releases();
+          var release = releases.FirstOrDefault(candidate => candidate["target_commitish"]?.GetValue<string>() == headSha)
+              ?? releases.FirstOrDefault(candidate => candidate["created_at"]!.GetValue<DateTime>().ToUniversalTime() >= dispatched);
+          if (release is null)
+          {
+              Console.WriteLine($"::error::{runUrl} succeeded, but {repository} has no release for commit {headSha}.");
+              return 1;
+          }
+
+          return WriteRelease(release, runUrl);
+
+          List<JsonObject> Releases() =>
+          [
+              .. JsonNode.Parse(Gh("api", $"repos/{repository}/releases?per_page=20").StandardOutput)!.AsArray()
+                  .Select(node => node!.AsObject())
+                  .Where(candidate => candidate["draft"]?.GetValue<bool>() is not true),
+          ];
+
+          int WriteRelease(JsonObject release, string? runUrl)
+          {
+              var assets = release["assets"]!.AsArray().Select(asset => asset!["name"]!.GetValue<string>()).Where(asset => asset.EndsWith(".nupkg", StringComparison.OrdinalIgnoreCase)).ToList();
+              var tag = release["tag_name"]!.GetValue<string>();
+              string[] candidates = [release["name"]?.GetValue<string>() ?? "", tag, tag.TrimStart('v')];
+              var (version, packages) = candidates
+                  .Where(candidate => candidate is not "")
+                  .Select(candidate => (Version: candidate, Ids: assets.Where(asset => asset.EndsWith($".{candidate}.nupkg", StringComparison.OrdinalIgnoreCase)).Select(asset => asset[..^$".{candidate}.nupkg".Length]).ToList()))
+                  .FirstOrDefault(match => match.Ids.Count > 0);
+              if (packages is not { Count: > 0 })
+              {
+                  Console.WriteLine($"::error::Release {tag} in {repository} has no .nupkg assets.");
+                  return 1;
+              }
+
+              File.WriteAllText(Path.Combine(workDir, "release.json"), new JsonObject
+              {
+                  ["version"] = version,
+                  ["tag"] = tag,
+                  ["releaseUrl"] = release["html_url"]!.GetValue<string>(),
+                  ["runUrl"] = runUrl,
+                  ["packages"] = new JsonArray([.. packages.Select(id => (JsonNode?)JsonValue.Create(id))]),
+              }.ToJsonString());
+              Console.WriteLine($"Using {version}: {string.Join(", ", packages)}");
+              return 0;
+          }
+
+          static ProcessTextOutput Gh(params IEnumerable<string> arguments)
+          {
+              AppToken.Refresh();
+              return Process.RunAndCaptureText("gh", arguments);
+          }
+
+          // Installation tokens last an hour and the waits here last longer, so every gh or git call refreshes the token first.
+          internal static class AppToken
+          {
+              private static DateTimeOffset expires;
+
+              public static string Repository { get; set; } = "";
+
+              public static void Refresh()
+              {
+                  if (expires - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(10))
+                  {
+                      return;
+                  }
+
+                  using var http = Client(Jwt());
+                  var installation = JsonNode.Parse(http.GetStringAsync($"repos/{Repository}/installation").GetAwaiter().GetResult())!["id"]!.GetValue<long>();
+                  using var response = http.PostAsync($"app/installations/{installation}/access_tokens", null).GetAwaiter().GetResult();
+                  var body = JsonNode.Parse(response.EnsureSuccessStatusCode().Content.ReadAsStringAsync().GetAwaiter().GetResult())!;
+                  var token = body["token"]!.GetValue<string>();
+                  Console.WriteLine($"::add-mask::{token}");
+                  Environment.SetEnvironmentVariable("GH_TOKEN", token);
+                  expires = body["expires_at"]!.GetValue<DateTimeOffset>();
+              }
+
+              public static bool IsInstalled(string repository)
+              {
+                  using var http = Client(Jwt());
+                  using var response = http.GetAsync($"repos/{repository}/installation").GetAwaiter().GetResult();
+                  return response.IsSuccessStatusCode;
+              }
+
+              public static string Slug()
+              {
+                  using var http = Client(Jwt());
+                  return JsonNode.Parse(http.GetStringAsync("app").GetAwaiter().GetResult())!["slug"]!.GetValue<string>();
+              }
+
+              private static HttpClient Client(string jwt)
+              {
+                  HttpClient http = new() { BaseAddress = new("https://api.github.com/") };
+                  http.DefaultRequestHeaders.Authorization = new("Bearer", jwt);
+                  http.DefaultRequestHeaders.UserAgent.ParseAdd("reactiveui-release-train");
+                  http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+                  return http;
+              }
+
+              private static string Jwt()
+              {
+                  using var rsa = RSA.Create();
+                  rsa.ImportFromPem(Environment.GetEnvironmentVariable("APP_PRIVATE_KEY"));
+                  var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                  var claims = $"{{\"iat\":{now - 60},\"exp\":{now + 540},\"iss\":\"{Environment.GetEnvironmentVariable("APP_CLIENT_ID")}\"}}";
+                  var unsigned = $"{Base64Url.EncodeToString("{\"alg\":\"RS256\",\"typ\":\"JWT\"}"u8)}.{Base64Url.EncodeToString(Encoding.UTF8.GetBytes(claims))}";
+                  return $"{unsigned}.{Base64Url.EncodeToString(rsa.SignData(Encoding.ASCII.GetBytes(unsigned), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))}";
+              }
+          }
+          CS
+
+      - name: Wait for NuGet
+        id: nuget
+        if: steps.update.outputs.blocked != 'true'
+        shell: bash
+        env:
+          TIMEOUT_MINUTES: ${{ fromJSON(inputs.settings).nugetMinutes }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$RUNNER_TEMP/train/release.json" "$TIMEOUT_MINUTES" <<'CS'
+          using System.Globalization;
+          using System.Text.Json.Nodes;
+
+          if (args is not [var releasePath, var timeoutMinutes])
+          {
+              Console.WriteLine("::error::Expected the release file and timeout arguments.");
+              return 2;
+          }
+
+          var release = JsonNode.Parse(File.ReadAllText(releasePath))!.AsObject();
+          var version = release["version"]!.GetValue<string>().Split('+')[0].ToLowerInvariant();
+          var pending = release["packages"]!.AsArray().Select(id => id!.GetValue<string>()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+          var deadline = DateTime.UtcNow.AddMinutes(int.Parse(timeoutMinutes, CultureInfo.InvariantCulture));
+          using HttpClient http = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+          // Restore reads the flat container, so a version listed there is ready for the next repository.
+          while (true)
+          {
+              foreach (var id in pending.ToList())
+              {
+                  try
+                  {
+                      var index = JsonNode.Parse(await http.GetStringAsync($"https://api.nuget.org/v3-flatcontainer/{id.ToLowerInvariant()}/index.json"));
+                      if (index?["versions"]?.AsArray().Any(listed => listed!.GetValue<string>() == version) is true)
+                      {
+                          Console.WriteLine($"{id} {version} is on NuGet.");
+                          pending.Remove(id);
+                      }
+                  }
+                  catch (HttpRequestException exception)
+                  {
+                      Console.WriteLine($"{id}: {exception.Message}");
+                  }
+              }
+
+              if (pending.Count is 0)
+              {
+                  return 0;
+              }
+
+              if (DateTime.UtcNow > deadline)
+              {
+                  Console.WriteLine($"::error::NuGet did not list {version} of {string.Join(", ", pending)} within {timeoutMinutes} minutes.");
+                  return 1;
+              }
+
+              Console.WriteLine($"Waiting for NuGet to list {pending.Count} package(s).");
+              await Task.Delay(TimeSpan.FromSeconds(60));
+          }
+          CS
+
+      - name: Record result
+        if: always()
+        shell: bash
+        env:
+          NAME: ${{ matrix.repository.name }}
+          REPOSITORY: ${{ matrix.repository.repository }}
+          BLOCKED: ${{ steps.update.outputs.blocked }}
+          REASON: ${{ steps.update.outputs.reason }}
+          UPDATE_OUTCOME: ${{ steps.update.outcome }}
+          RELEASE_OUTCOME: ${{ steps.release.outcome }}
+          NUGET_OUTCOME: ${{ steps.nuget.outcome }}
+          PULL_REQUEST: ${{ steps.update.outputs.pull-request }}
+          RUN_URL: ${{ steps.release.outputs.run-url }}
+          REUSED: ${{ steps.release.outputs.reused }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$NAME" "$REPOSITORY" "$BLOCKED" "$REASON" "$UPDATE_OUTCOME" "$RELEASE_OUTCOME" "$NUGET_OUTCOME" "$PULL_REQUEST" "$RUN_URL" "$REUSED" "$RUNNER_TEMP/train" "$RUNNER_TEMP/train-result" <<'CS'
+          using System.Globalization;
+          using System.Text;
+          using System.Text.Json.Nodes;
+          using static System.Environment;
+
+          if (args is not [var name, var repository, var blocked, var reason, var updateOutcome, var releaseOutcome, var nugetOutcome, var pullRequest, var runUrl, var reused, var workDir, var resultDir])
+          {
+              Console.WriteLine("::error::Expected the name, repository, blocked, reason, step outcomes, pull request, run URL, reused, work folder and result folder arguments.");
+              return 2;
+          }
+
+          JsonNode? Read(string file) => File.Exists(Path.Combine(workDir, file)) ? JsonNode.Parse(File.ReadAllText(Path.Combine(workDir, file))) : null;
+          var release = Read("release.json");
+          var updates = Read("updates.json");
+          var failedStep = new[] { ("update dependencies", updateOutcome), ("release", releaseOutcome), ("wait for NuGet", nugetOutcome) }
+              .FirstOrDefault(step => step.Item2 is "failure" or "cancelled").Item1;
+          var (status, message) = (blocked, nugetOutcome, failedStep) switch
+          {
+              ("true", _, _) => ("blocked", reason),
+              (_, "success", _) when reused is "true" => ("released", $"{release?["version"]} was already released at the head of the branch. The train reused it."),
+              (_, "success", _) => ("released", $"Released {release?["version"]}."),
+              (_, _, "update dependencies") when pullRequest is not "" => ("failed", $"The dependency pull request did not merge. Fix {pullRequest}, merge it, then resume the train from {name}."),
+              (_, _, { } step) => ("failed", $"Failed at {step}."),
+              _ => ("failed", "The job stopped before it finished."),
+          };
+
+          var result = new JsonObject
+          {
+              ["name"] = name,
+              ["repository"] = repository,
+              ["status"] = status,
+              ["reused"] = reused is "true",
+              ["message"] = message,
+              ["version"] = release?["version"]?.GetValue<string>(),
+              ["tag"] = release?["tag"]?.GetValue<string>(),
+              ["releaseUrl"] = release?["releaseUrl"]?.GetValue<string>(),
+              ["runUrl"] = runUrl is "" ? null : runUrl,
+              ["pullRequest"] = pullRequest is "" ? null : pullRequest,
+              ["packages"] = release?["packages"]?.DeepClone() ?? new JsonArray(),
+              ["updates"] = updates?["updates"]?.DeepClone() ?? new JsonArray(),
+              ["notes"] = updates?["notes"]?.DeepClone() ?? new JsonArray(),
+          };
+
+          Directory.CreateDirectory(resultDir);
+          File.WriteAllText(Path.Combine(resultDir, $"{name}.json"), result.ToJsonString());
+
+          StringBuilder summary = new();
+          summary.AppendLine(CultureInfo.InvariantCulture, $"## {repository}: {status}").AppendLine().AppendLine(message).AppendLine();
+          if (result["pullRequest"] is { } link)
+          {
+              summary.AppendLine(CultureInfo.InvariantCulture, $"Pull request: {link}").AppendLine();
+          }
+
+          if (result["releaseUrl"] is { } releaseUrl)
+          {
+              summary.AppendLine(CultureInfo.InvariantCulture, $"Release: {releaseUrl}").AppendLine();
+          }
+
+          File.AppendAllText(GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!, summary.ToString());
+          return 0;
+          CS
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: train-result-${{ matrix.repository.name }}
+          path: ${{ runner.temp }}/train-result/*.json
+          if-no-files-found: error

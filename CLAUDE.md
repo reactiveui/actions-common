@@ -160,6 +160,17 @@ Use the newest C# the .NET 11 SDK accepts:
   [model pack guide](https://docs.github.com/en/code-security/codeql-cli/using-the-advanced-functionality-of-the-codeql-cli/creating-and-working-with-codeql-packs).
 - **Keep the package public.** Calling repositories read it with their own `GITHUB_TOKEN`.
 
+## The Release Train
+
+- `release-train.yml` and `release-train-level.yml` run in this repository only. Other repositories do not call them.
+- `build/release-train.json` holds the repositories and their `dependsOn` order. Add a repository there, not in
+  the workflow.
+- **Each level is its own job.** `release-train.yml` has jobs `level-0` to `level-9`, which gives each level its own
+  six-hour job limit. The plan fails when the config needs more levels. Add a job and a `levelN` output to raise it.
+- **Every job records a result, even when it fails.** Later levels read the `train-result-*` artifacts to find the
+  versions to use and to block repositories whose dependency failed.
+- **Check a change with `dryRun`.** A dry run plans the train and releases nothing.
+
 ## Renovate
 
 - `.github/renovate.json` extends the organisation's

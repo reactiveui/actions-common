@@ -1,0 +1,694 @@
+name: Release train
+
+run-name: Release train (${{ inputs.targets }})
+
+# Releases ReactiveUI repositories in dependency order. build/release-train.json lists the repositories.
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Repositories or groups from build/release-train.json, separated by commas. all selects every repository.'
+        required: true
+        type: string
+
+      includeDownstream:
+        description: 'Also release every repository that depends on the targets.'
+        type: boolean
+        default: true
+
+      exclude:
+        description: 'Repositories or groups to leave out, separated by commas.'
+        type: string
+        default: ''
+
+      bump:
+        description: 'Release level for every repository.'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+      channel:
+        description: 'Release channel. none releases a stable version. alpha, beta and rc release a pre-release.'
+        required: true
+        default: none
+        type: choice
+        options:
+          - none
+          - alpha
+          - beta
+          - rc
+
+      onFailure:
+        description: 'stop starts no new level after a failure. continue keeps releasing repositories that do not depend on the failed one.'
+        required: true
+        default: stop
+        type: choice
+        options:
+          - stop
+          - continue
+
+      dryRun:
+        description: 'Show the plan without releasing anything.'
+        type: boolean
+        default: false
+
+  workflow_call:
+    inputs:
+      targets:
+        description: 'Repositories or groups from build/release-train.json, separated by commas. all selects every repository.'
+        required: true
+        type: string
+
+      includeDownstream:
+        description: 'Also release every repository that depends on the targets.'
+        type: boolean
+        default: true
+
+      exclude:
+        description: 'Repositories or groups to leave out, separated by commas.'
+        type: string
+        default: ''
+
+      bump:
+        description: 'Release level for every repository (patch, minor or major).'
+        required: true
+        type: string
+
+      channel:
+        description: 'Release channel (none, alpha, beta or rc).'
+        type: string
+        default: none
+
+      onFailure:
+        description: 'stop or continue after a failure.'
+        type: string
+        default: stop
+
+      dryRun:
+        description: 'Show the plan without releasing anything.'
+        type: boolean
+        default: false
+
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID:
+        required: true
+        description: 'Client ID of the GitHub App that opens pull requests, merges them and starts release workflows.'
+
+      RELEASE_TRAIN_APP_PRIVATE_KEY:
+        required: true
+        description: 'Private key (.pem contents) of that GitHub App.'
+
+    outputs:
+      results:
+        description: 'JSON list with the result of every planned repository.'
+        value: ${{ jobs.summary.outputs.results }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-train
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      depth: ${{ steps.plan.outputs.depth }}
+      settings: ${{ steps.plan.outputs.settings }}
+      plan: ${{ steps.plan.outputs.plan }}
+      level0: ${{ steps.plan.outputs.level0 }}
+      level1: ${{ steps.plan.outputs.level1 }}
+      level2: ${{ steps.plan.outputs.level2 }}
+      level3: ${{ steps.plan.outputs.level3 }}
+      level4: ${{ steps.plan.outputs.level4 }}
+      level5: ${{ steps.plan.outputs.level5 }}
+      level6: ${{ steps.plan.outputs.level6 }}
+      level7: ${{ steps.plan.outputs.level7 }}
+      level8: ${{ steps.plan.outputs.level8 }}
+      level9: ${{ steps.plan.outputs.level9 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
+
+      - name: Plan release order
+        id: plan
+        shell: bash
+        env:
+          APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+          TARGETS: ${{ inputs.targets }}
+          INCLUDE_DOWNSTREAM: ${{ inputs.includeDownstream }}
+          EXCLUDE: ${{ inputs.exclude }}
+          BUMP: ${{ inputs.bump }}
+          CHANNEL: ${{ inputs.channel }}
+          ON_FAILURE: ${{ inputs.onFailure }}
+          DRY_RUN: ${{ inputs.dryRun }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- build/release-train.json "$TARGETS" "$INCLUDE_DOWNSTREAM" "$EXCLUDE" "$BUMP" "$CHANNEL" "$ON_FAILURE" "$DRY_RUN" <<'CS'
+          using System.Buffers.Text;
+          using System.Globalization;
+          using System.Security.Cryptography;
+          using System.Text;
+          using System.Text.Json.Nodes;
+          using static System.Environment;
+
+          const int MaxLevels = 10;
+
+          if (args is not [var configPath, var targets, var includeDownstream, var exclude, var bump, var channel, var onFailure, var dryRun])
+          {
+              Console.WriteLine("::error::Expected the config path, targets, include downstream, exclude, bump, channel, on failure and dry run arguments.");
+              return 2;
+          }
+
+          if (dryRun is not "true" && (GetEnvironmentVariable("APP_CLIENT_ID") is null or "" || GetEnvironmentVariable("APP_PRIVATE_KEY") is null or ""))
+          {
+              Console.WriteLine("::error::The RELEASE_TRAIN_APP_CLIENT_ID and RELEASE_TRAIN_APP_PRIVATE_KEY secrets must both be set. README.md describes the GitHub App.");
+              return 1;
+          }
+
+          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+
+          if (JsonNode.Parse(File.ReadAllText(configPath)) is not JsonObject config
+              || config["owner"]?.GetValue<string>() is not { Length: > 0 } owner
+              || config["repositories"] is not JsonArray repositoryNodes)
+          {
+              Console.WriteLine($"::error::{configPath} needs an owner and a repositories list.");
+              return 1;
+          }
+
+          var defaults = config["defaults"] as JsonObject ?? [];
+          var timeouts = config["timeouts"] as JsonObject ?? [];
+          Dictionary<string, JsonObject> repositories = [with(StringComparer.OrdinalIgnoreCase)];
+          List<string> order = [];
+          foreach (var node in repositoryNodes)
+          {
+              if (node?["name"]?.GetValue<string>() is not { Length: > 0 } name)
+              {
+                  Console.WriteLine("::error::Every repository needs a name.");
+                  return 1;
+              }
+
+              if (!repositories.TryAdd(name, node.AsObject()))
+              {
+                  Console.WriteLine($"::error::{name} is listed twice.");
+                  return 1;
+              }
+
+              order.Add(name);
+          }
+
+          Dictionary<string, string[]> dependsOn = [with(StringComparer.OrdinalIgnoreCase)];
+          foreach (var name in order)
+          {
+              dependsOn[name] = [.. (repositories[name]["dependsOn"] as JsonArray ?? []).Select(dependency => dependency!.GetValue<string>())];
+              if (dependsOn[name].FirstOrDefault(dependency => !repositories.ContainsKey(dependency)) is { } unknown)
+              {
+                  Console.WriteLine($"::error::{name} depends on {unknown}, which is not in the config.");
+                  return 1;
+              }
+
+              dependsOn[name] = [.. dependsOn[name].Select(dependency => order.First(known => known.Equals(dependency, StringComparison.OrdinalIgnoreCase)))];
+          }
+
+          Dictionary<string, HashSet<string>> ancestors = [with(StringComparer.OrdinalIgnoreCase)];
+          foreach (var name in order)
+          {
+              HashSet<string> found = [with(StringComparer.OrdinalIgnoreCase)];
+              Stack<(string Name, int Depth)> pending = new([.. dependsOn[name].Select(dependency => (dependency, 1))]);
+              while (pending.TryPop(out var current))
+              {
+                  if (current.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || current.Depth > order.Count)
+                  {
+                      Console.WriteLine($"::error::{name} depends on itself through dependsOn.");
+                      return 1;
+                  }
+
+                  if (found.Add(current.Name))
+                  {
+                      foreach (var dependency in dependsOn[current.Name])
+                      {
+                          pending.Push((dependency, current.Depth + 1));
+                      }
+                  }
+              }
+
+              ancestors[name] = found;
+          }
+
+          var groups = config["groups"] as JsonObject ?? [];
+          List<string>? Expand(string list)
+          {
+              List<string> names = [];
+              foreach (var token in list.Split([',', ' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries))
+              {
+                  if (token.Equals("all", StringComparison.OrdinalIgnoreCase))
+                  {
+                      names.AddRange(order);
+                  }
+                  else if (groups.FirstOrDefault(group => group.Key.Equals(token, StringComparison.OrdinalIgnoreCase)).Value is JsonArray members)
+                  {
+                      names.AddRange(members.Select(member => member!.GetValue<string>()));
+                  }
+                  else if (order.FirstOrDefault(name => name.Equals(token, StringComparison.OrdinalIgnoreCase)) is { } name)
+                  {
+                      names.Add(name);
+                  }
+                  else
+                  {
+                      Console.WriteLine($"::error::{token} is not a repository or group in the config.");
+                      return null;
+                  }
+              }
+
+              if (names.FirstOrDefault(name => !repositories.ContainsKey(name)) is { } missing)
+              {
+                  Console.WriteLine($"::error::A group lists {missing}, which is not in the config.");
+                  return null;
+              }
+
+              return names;
+          }
+
+          if (Expand(targets) is not { Count: > 0 } targeted || Expand(exclude) is not { } excluded)
+          {
+              Console.WriteLine("::error::Choose at least one repository or group to release.");
+              return 1;
+          }
+
+          HashSet<string> selected = [.. targeted.Select(name => order.First(known => known.Equals(name, StringComparison.OrdinalIgnoreCase)))];
+          if (includeDownstream is "true")
+          {
+              selected.UnionWith(order.Where(name => ancestors[name].Overlaps(selected)));
+          }
+
+          selected.ExceptWith(excluded.Select(name => order.First(known => known.Equals(name, StringComparison.OrdinalIgnoreCase))));
+          if (selected.Count is 0)
+          {
+              Console.WriteLine("::error::The exclude list removes every repository.");
+              return 1;
+          }
+
+          Dictionary<string, int> levels = [with(StringComparer.OrdinalIgnoreCase)];
+          int LevelOf(string name) => levels.TryGetValue(name, out var level)
+              ? level
+              : levels[name] = ancestors[name].Where(selected.Contains).Select(LevelOf).DefaultIfEmpty(-1).Max() + 1;
+
+          var planned = order.Where(selected.Contains).OrderBy(LevelOf).ToList();
+          var depth = planned.Max(LevelOf) + 1;
+          if (depth > MaxLevels)
+          {
+              Console.WriteLine($"::error::The plan needs {depth} levels. release-train.yml runs at most {MaxLevels}.");
+              return 1;
+          }
+
+          string Setting(JsonObject repository, string key, string fallback) =>
+              repository[key]?.GetValue<string>() ?? defaults[key]?.GetValue<string>() ?? fallback;
+
+          if (dryRun is not "true"
+              && planned.Select(name => Setting(repositories[name], "repository", $"{owner}/{name}")).Where(repository => !AppToken.IsInstalled(repository)).ToList() is { Count: > 0 } missing)
+          {
+              Console.WriteLine($"::error::The release train GitHub App is not installed on {string.Join(", ", missing)}.");
+              return 1;
+          }
+
+          var levelEntries = Enumerable.Range(0, MaxLevels).Select(_ => new JsonArray()).ToArray();
+          foreach (var name in planned)
+          {
+              var repository = repositories[name];
+              var templates = repository["releaseInputs"] as JsonObject ?? defaults["releaseInputs"] as JsonObject ?? new JsonObject { ["bump"] = "{bump}" };
+              if (channel is not "none" && !templates.Any(input => input.Value!.GetValue<string>().Contains("{channel}", StringComparison.Ordinal)))
+              {
+                  Console.WriteLine($"::error::{name} has no release input for the {channel} channel.");
+                  return 1;
+              }
+
+              JsonObject inputs = [];
+              foreach (var (key, template) in templates)
+              {
+                  inputs[key] = template!.GetValue<string>().Replace("{bump}", bump, StringComparison.Ordinal).Replace("{channel}", channel, StringComparison.Ordinal);
+              }
+
+              levelEntries[LevelOf(name)].Add((JsonNode)new JsonObject
+              {
+                  ["name"] = name,
+                  ["repository"] = Setting(repository, "repository", $"{owner}/{name}"),
+                  ["branch"] = Setting(repository, "branch", "main"),
+                  ["workflow"] = Setting(repository, "releaseWorkflow", "release.yml"),
+                  ["adminMerge"] = repository["adminMerge"]?.GetValue<bool>() ?? false,
+                  ["inputs"] = inputs,
+                  ["waitsFor"] = new JsonArray([.. planned.Where(ancestors[name].Contains).Select(ancestor => JsonValue.Create(ancestor))]),
+                  ["ignorePackages"] = (repository["ignorePackages"] as JsonArray)?.DeepClone() ?? new JsonArray(),
+              });
+          }
+
+          int Minutes(string key, int fallback) => timeouts[key]?.GetValue<int>() ?? fallback;
+          var settings = new JsonObject
+          {
+              ["catalog"] = new JsonArray([.. order.Select(name => new JsonObject
+              {
+                  ["name"] = name,
+                  ["repository"] = Setting(repositories[name], "repository", $"{owner}/{name}"),
+              })]),
+              ["updateBranch"] = config["updateBranch"]?.GetValue<string>() ?? "release-train/dependencies",
+              ["checksMinutes"] = Minutes("checksMinutes", 120),
+              ["releaseMinutes"] = Minutes("releaseMinutes", 180),
+              ["nugetMinutes"] = Minutes("nugetMinutes", 120),
+          };
+
+          var plan = new JsonArray([.. planned.Select(name => new JsonObject { ["name"] = name, ["level"] = LevelOf(name) })]);
+          File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!,
+          [
+              .. levelEntries.Select((entries, level) => $"level{level}={entries.ToJsonString()}"),
+              $"depth={depth}",
+              $"settings={settings.ToJsonString()}",
+              $"plan={plan.ToJsonString()}",
+          ]);
+
+          StringBuilder summary = new();
+          summary.AppendLine("## Release train plan").AppendLine();
+          summary.AppendLine(CultureInfo.InvariantCulture, $"Bump `{bump}`, channel `{channel}`, on failure `{onFailure}`.").AppendLine();
+          summary.AppendLine("| Level | Repository | After | Release inputs |").AppendLine("|---|---|---|---|");
+          foreach (var (entries, level) in levelEntries.Select((entries, level) => (entries, level)).Where(pair => pair.entries.Count > 0))
+          {
+              foreach (var entry in entries)
+              {
+                  var waits = string.Join(", ", dependsOn[entry!["name"]!.GetValue<string>()].Where(selected.Contains));
+                  var inputs = string.Join(", ", entry["inputs"]!.AsObject().Select(input => $"{input.Key}={input.Value}"));
+                  summary.AppendLine(CultureInfo.InvariantCulture, $"| {level} | {entry["repository"]} | {(waits is "" ? "-" : waits)} | {inputs} |");
+              }
+          }
+
+          File.AppendAllText(GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!, summary.ToString());
+          Console.Write(summary);
+          return 0;
+
+          // Installation tokens last an hour and the waits here last longer, so every gh or git call refreshes the token first.
+          internal static class AppToken
+          {
+              private static DateTimeOffset expires;
+
+              public static string Repository { get; set; } = "";
+
+              public static void Refresh()
+              {
+                  if (expires - DateTimeOffset.UtcNow > TimeSpan.FromMinutes(10))
+                  {
+                      return;
+                  }
+
+                  using var http = Client(Jwt());
+                  var installation = JsonNode.Parse(http.GetStringAsync($"repos/{Repository}/installation").GetAwaiter().GetResult())!["id"]!.GetValue<long>();
+                  using var response = http.PostAsync($"app/installations/{installation}/access_tokens", null).GetAwaiter().GetResult();
+                  var body = JsonNode.Parse(response.EnsureSuccessStatusCode().Content.ReadAsStringAsync().GetAwaiter().GetResult())!;
+                  var token = body["token"]!.GetValue<string>();
+                  Console.WriteLine($"::add-mask::{token}");
+                  Environment.SetEnvironmentVariable("GH_TOKEN", token);
+                  expires = body["expires_at"]!.GetValue<DateTimeOffset>();
+              }
+
+              public static bool IsInstalled(string repository)
+              {
+                  using var http = Client(Jwt());
+                  using var response = http.GetAsync($"repos/{repository}/installation").GetAwaiter().GetResult();
+                  return response.IsSuccessStatusCode;
+              }
+
+              public static string Slug()
+              {
+                  using var http = Client(Jwt());
+                  return JsonNode.Parse(http.GetStringAsync("app").GetAwaiter().GetResult())!["slug"]!.GetValue<string>();
+              }
+
+              private static HttpClient Client(string jwt)
+              {
+                  HttpClient http = new() { BaseAddress = new("https://api.github.com/") };
+                  http.DefaultRequestHeaders.Authorization = new("Bearer", jwt);
+                  http.DefaultRequestHeaders.UserAgent.ParseAdd("reactiveui-release-train");
+                  http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+                  return http;
+              }
+
+              private static string Jwt()
+              {
+                  using var rsa = RSA.Create();
+                  rsa.ImportFromPem(Environment.GetEnvironmentVariable("APP_PRIVATE_KEY"));
+                  var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                  var claims = $"{{\"iat\":{now - 60},\"exp\":{now + 540},\"iss\":\"{Environment.GetEnvironmentVariable("APP_CLIENT_ID")}\"}}";
+                  var unsigned = $"{Base64Url.EncodeToString("{\"alg\":\"RS256\",\"typ\":\"JWT\"}"u8)}.{Base64Url.EncodeToString(Encoding.UTF8.GetBytes(claims))}";
+                  return $"{unsigned}.{Base64Url.EncodeToString(rsa.SignData(Encoding.ASCII.GetBytes(unsigned), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))}";
+              }
+          }
+          CS
+
+  # One job per level. A level starts after the level before it succeeds, or also after it fails when onFailure is continue.
+  level-0:
+    name: Level 0
+    needs: plan
+    if: ${{ !inputs.dryRun }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 0
+      repositories: ${{ needs.plan.outputs.level0 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-1:
+    name: Level 1
+    needs: [plan, level-0]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 1 && (needs.level-0.result == 'success' || (inputs.onFailure == 'continue' && needs.level-0.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 1
+      repositories: ${{ needs.plan.outputs.level1 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-2:
+    name: Level 2
+    needs: [plan, level-1]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 2 && (needs.level-1.result == 'success' || (inputs.onFailure == 'continue' && needs.level-1.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 2
+      repositories: ${{ needs.plan.outputs.level2 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-3:
+    name: Level 3
+    needs: [plan, level-2]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 3 && (needs.level-2.result == 'success' || (inputs.onFailure == 'continue' && needs.level-2.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 3
+      repositories: ${{ needs.plan.outputs.level3 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-4:
+    name: Level 4
+    needs: [plan, level-3]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 4 && (needs.level-3.result == 'success' || (inputs.onFailure == 'continue' && needs.level-3.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 4
+      repositories: ${{ needs.plan.outputs.level4 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-5:
+    name: Level 5
+    needs: [plan, level-4]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 5 && (needs.level-4.result == 'success' || (inputs.onFailure == 'continue' && needs.level-4.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 5
+      repositories: ${{ needs.plan.outputs.level5 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-6:
+    name: Level 6
+    needs: [plan, level-5]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 6 && (needs.level-5.result == 'success' || (inputs.onFailure == 'continue' && needs.level-5.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 6
+      repositories: ${{ needs.plan.outputs.level6 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-7:
+    name: Level 7
+    needs: [plan, level-6]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 7 && (needs.level-6.result == 'success' || (inputs.onFailure == 'continue' && needs.level-6.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 7
+      repositories: ${{ needs.plan.outputs.level7 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-8:
+    name: Level 8
+    needs: [plan, level-7]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 8 && (needs.level-7.result == 'success' || (inputs.onFailure == 'continue' && needs.level-7.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 8
+      repositories: ${{ needs.plan.outputs.level8 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  level-9:
+    name: Level 9
+    needs: [plan, level-8]
+    if: ${{ !cancelled() && fromJSON(needs.plan.outputs.depth) > 9 && (needs.level-8.result == 'success' || (inputs.onFailure == 'continue' && needs.level-8.result == 'failure')) }}
+    uses: ./.github/workflows/release-train-level.yml
+    with:
+      level: 9
+      repositories: ${{ needs.plan.outputs.level9 }}
+      settings: ${{ needs.plan.outputs.settings }}
+    secrets:
+      RELEASE_TRAIN_APP_CLIENT_ID: ${{ secrets.RELEASE_TRAIN_APP_CLIENT_ID }}
+      RELEASE_TRAIN_APP_PRIVATE_KEY: ${{ secrets.RELEASE_TRAIN_APP_PRIVATE_KEY }}
+
+  summary:
+    name: Summary
+    needs: [plan, level-0, level-1, level-2, level-3, level-4, level-5, level-6, level-7, level-8, level-9]
+    if: ${{ always() && needs.plan.result == 'success' && !inputs.dryRun }}
+    runs-on: ubuntu-latest
+    outputs:
+      results: ${{ steps.summary.outputs.results }}
+    steps:
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
+
+      # A train cancelled before its first result has nothing to download. The summary then lists every repository as not started.
+      - name: Download results
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: train-result-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/train-results
+
+      - name: Summarise the train
+        id: summary
+        shell: bash
+        env:
+          PLAN: ${{ needs.plan.outputs.plan }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run - -- "$PLAN" "$RUNNER_TEMP/train-results" <<'CS'
+          using System.Globalization;
+          using System.Text;
+          using System.Text.Json.Nodes;
+          using static System.Environment;
+
+          if (args is not [var planJson, var resultsDir])
+          {
+              Console.WriteLine("::error::Expected the plan and results folder arguments.");
+              return 2;
+          }
+
+          var plan = JsonNode.Parse(planJson)!.AsArray().Select(node => node!.AsObject()).ToList();
+          Dictionary<string, JsonObject> results = [with(StringComparer.OrdinalIgnoreCase)];
+          if (Directory.Exists(resultsDir))
+          {
+              foreach (var file in Directory.GetFiles(resultsDir, "*.json"))
+              {
+                  var result = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+                  results[result["name"]!.GetValue<string>()] = result;
+              }
+          }
+
+          string Status(string name) => results.GetValueOrDefault(name)?["status"]?.GetValue<string>() ?? "not started";
+          string Link(JsonNode? url, string text) => url is null ? "-" : $"[{text}]({url})";
+
+          StringBuilder summary = new();
+          summary.AppendLine("## Release train").AppendLine();
+          summary.AppendLine("| Level | Repository | Result | Version | Dependency updates | Pull request | Release |").AppendLine("|---|---|---|---|---|---|---|");
+          foreach (var step in plan)
+          {
+              var name = step["name"]!.GetValue<string>();
+              var result = results.GetValueOrDefault(name);
+              summary.AppendLine(CultureInfo.InvariantCulture,
+                  $"| {step["level"]} | {name} | {(result?["reused"]?.GetValue<bool>() is true ? "already released" : Status(name))} | {result?["version"] ?? "-"} | {result?["updates"]?.AsArray().Count ?? 0} | {Link(result?["pullRequest"], "pull request")} | {Link(result?["releaseUrl"], "release")} |");
+          }
+
+          foreach (var result in plan.Select(step => results.GetValueOrDefault(step["name"]!.GetValue<string>())).OfType<JsonObject>())
+          {
+              var updates = result["updates"]!.AsArray();
+              var notes = result["notes"]!.AsArray();
+              summary.AppendLine().AppendLine(CultureInfo.InvariantCulture, $"### {result["name"]}").AppendLine().AppendLine(result["message"]!.GetValue<string>()).AppendLine();
+              if (result["runUrl"] is { } runUrl)
+              {
+                  summary.AppendLine(CultureInfo.InvariantCulture, $"Release run: {runUrl}").AppendLine();
+              }
+
+              if (updates.Count > 0)
+              {
+                  summary.AppendLine("| File | Package or property | From | To | Source |").AppendLine("|---|---|---|---|---|");
+                  foreach (var update in updates)
+                  {
+                      summary.AppendLine(CultureInfo.InvariantCulture, $"| `{update!["file"]}` | `{update["item"]}` | {update["from"]} | {update["to"]} | {update["source"]} |");
+                  }
+
+                  summary.AppendLine();
+              }
+
+              foreach (var note in notes)
+              {
+                  summary.AppendLine(CultureInfo.InvariantCulture, $"- {note}");
+              }
+
+              if (result["packages"]!.AsArray() is { Count: > 0 } packages)
+              {
+                  summary.AppendLine().AppendLine(CultureInfo.InvariantCulture, $"Packages: {string.Join(", ", packages.Select(id => $"`{id}`"))}");
+              }
+          }
+
+          var remaining = plan.Select(step => step["name"]!.GetValue<string>()).Where(name => Status(name) is not "released").ToList();
+          if (remaining.Count > 0)
+          {
+              summary.AppendLine().AppendLine("### Resume").AppendLine();
+              summary.AppendLine("Fix the failure, then run the release train again with these inputs. It picks up the versions this run already released.").AppendLine();
+              summary.AppendLine("```text").AppendLine(CultureInfo.InvariantCulture, $"targets: {string.Join(", ", remaining)}").AppendLine("includeDownstream: false").AppendLine("```");
+          }
+
+          File.AppendAllText(GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!, summary.ToString());
+          var all = new JsonArray([.. plan.Select(step => (JsonNode?)(results.GetValueOrDefault(step["name"]!.GetValue<string>())?.DeepClone() ?? new JsonObject { ["name"] = step["name"]!.GetValue<string>(), ["status"] = "not started" }))]);
+          File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!, [$"results={all.ToJsonString()}", $"remaining={string.Join(",", remaining)}"]);
+          Console.Write(summary);
+          return remaining.Count > 0 ? 1 : 0;
+          CS

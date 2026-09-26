@@ -14,6 +14,7 @@ shared pieces that do that work. Each repository calls them instead of keeping i
 - [How a version is chosen](#how-a-version-is-chosen)
 - [The signer image](#the-signer-image)
 - [The CodeQL pack](#the-codeql-pack)
+- [The release train](#the-release-train)
 - [How dependencies stay current](#how-dependencies-stay-current)
 - [Why there is no dependency cache](#why-there-is-no-dependency-cache)
 - [Coverage from three operating systems](#coverage-from-three-operating-systems)
@@ -178,6 +179,119 @@ The pack adds `reactiveui` to the owners CodeQL trusts. Actions from any other o
   [model pack guide](https://docs.github.com/en/code-security/codeql-cli/using-the-advanced-functionality-of-the-codeql-cli/creating-and-working-with-codeql-packs)
   describes the format.
 - **It is public.** Each repository downloads it with its own `GITHUB_TOKEN`, which cannot read private packages.
+
+## The release train
+
+The release train releases several ReactiveUI repositories in dependency order. Other repositories do not call it.
+You start it from this repository's Actions tab with `release-train.yml`.
+
+For example, a Splat release needs ReactiveUI, Akavache and the others to move to the new Splat version and release
+too. The train does that work for you:
+
+1. It releases Splat with Splat's own `release.yml`.
+2. It waits until NuGet lists every new Splat package.
+3. It opens a pull request in each repository that depends on Splat. The pull request updates the package
+   versions.
+4. It merges the pull request when its checks pass, then releases that repository.
+5. It repeats steps 2 to 4 down the dependency graph.
+
+A repository whose latest release already points at the head of its branch has nothing new to ship. The train
+reuses that release instead of releasing again.
+
+Only the packages a library ships with decide the order. A repository that uses another repository's packages only
+in its tests does not list it in `dependsOn`. Its test pins still move to that repository's latest release.
+
+### The config
+
+`build/release-train.json` lists the repositories. Each entry names a repository and the repositories it
+`dependsOn`. The train releases a repository only after everything it depends on has released.
+
+```json
+{
+  "name": "ReactiveUI",
+  "dependsOn": ["Primitives", "splat", "ReactiveUI.Binding.SourceGenerators"],
+  "releaseInputs": { "bump": "{bump}", "channel": "{channel}" }
+}
+```
+
+| Setting | What it does |
+|---|---|
+| `name` | The repository name. The repository is `<owner>/<name>` unless you set `repository`. |
+| `dependsOn` | Repositories that must release first. |
+| `releaseInputs` | Inputs for the repository's release workflow. `{bump}` and `{channel}` take the train's values. Leave out `{channel}` when the workflow has no channel input. |
+| `releaseWorkflow`, `branch` | The release workflow file and the branch it runs on. The defaults are `release.yml` and `main`. |
+| `ignorePackages` | Package IDs the train never updates in this repository. |
+| `adminMerge` | Merges the pull request past branch protection. Use it when a ruleset requires a review and lists the App as a bypass actor. |
+
+`groups` names sets of repositories, such as `core`. `timeouts` sets how many minutes the train waits for pull
+request checks, the release run and NuGet.
+
+### Starting a train
+
+| Input | What it does |
+|---|---|
+| `targets` | Repositories or groups to release, separated by commas. `all` releases every repository. |
+| `includeDownstream` | Also releases every repository that depends on the targets. |
+| `exclude` | Repositories or groups to leave out. |
+| `bump`, `channel` | The release level and channel for every repository. |
+| `onFailure` | `stop` starts no new level after a failure. `continue` keeps releasing the repositories that do not depend on the failed one. |
+| `dryRun` | Shows the plan without releasing anything. |
+
+To release Splat and everything that uses it, set `targets` to `splat` and keep `includeDownstream` on.
+
+A repository with its own preset can call the train as a reusable workflow with fixed inputs.
+
+### How versions are updated
+
+The train reads every `.props`, `.targets` and project file in the repository. It updates a
+`PackageVersion` or `PackageReference` that names a package from another repository in the config. When the
+version is an MSBuild property such as `$(SplatVersion)`, it updates the property instead.
+
+Each package gets its version from this run's release when the train released it. Otherwise it gets the version
+from the repository's latest GitHub release. The train never lowers a version, and it leaves ranges and other
+expressions alone.
+
+### When a repository fails
+
+The train stops at the failure and reports it. The run summary lists every repository with its result, version,
+pull request, release and each version it changed. It ends with the inputs to resume.
+
+Say ReactiveUI fails to build with the new Splat version:
+
+1. Fix the train's pull request in ReactiveUI and merge it.
+2. Start the train again with `targets` set to `ReactiveUI`.
+
+Splat does not release again. ReactiveUI picks up the Splat version that already shipped from Splat's latest
+release. The train reuses an open pull request on its `release-train/dependencies` branch, so your fix stays.
+
+### The GitHub App
+
+The train acts as an organisation GitHub App. The built-in `GITHUB_TOKEN` cannot do this work: pull requests it
+opens do not start CI, and it cannot start workflows in other repositories.
+
+An App token expires after one hour, and a train waits longer than that. So the scripts sign their own tokens
+with the App's private key and replace each token before it expires. Commits and pull requests appear as
+`<app-name>[bot]`.
+
+The train reads two organisation secrets, and this repository must have access to both:
+
+| Secret | Value |
+|---|---|
+| `RELEASE_TRAIN_APP_CLIENT_ID` | The App's client ID. |
+| `RELEASE_TRAIN_APP_PRIVATE_KEY` | The whole `.pem` private key file. |
+
+Install the App on every repository in the config. The plan job stops before it releases anything when the App is
+missing from a planned repository. Give the App these repository permissions:
+
+| Permission | Why |
+|---|---|
+| Contents: read and write | Push the update branch and merge the pull request. |
+| Pull requests: read and write | Open, comment on and merge the pull request. |
+| Actions: read and write | Start the release workflow and follow its run. |
+| Checks: read, Commit statuses: read | Read the pull request's check results. |
+
+When a ruleset requires a review, add the App to the ruleset's bypass list and set `adminMerge` for that
+repository.
 
 ## How dependencies stay current
 

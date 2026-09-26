@@ -1,0 +1,97 @@
+{
+  "owner": "reactiveui",
+  "updateBranch": "release-train/dependencies",
+  "defaults": {
+    "branch": "main",
+    "releaseWorkflow": "release.yml",
+    "releaseInputs": {
+      "bump": "{bump}"
+    }
+  },
+  "timeouts": {
+    "checksMinutes": 120,
+    "releaseMinutes": 180,
+    "nugetMinutes": 120
+  },
+  "groups": {
+    "core": ["Primitives", "splat", "ReactiveUI.Binding.SourceGenerators", "ReactiveUI.SourceGenerators", "ReactiveUI"]
+  },
+  "repositories": [
+    {
+      "name": "Primitives",
+      "dependsOn": []
+    },
+    {
+      "name": "splat",
+      "dependsOn": ["Primitives"]
+    },
+    {
+      "name": "punchclock",
+      "dependsOn": ["Primitives"]
+    },
+    {
+      "name": "refit",
+      "dependsOn": ["Primitives"],
+      "releaseInputs": {
+        "bump": "{bump}",
+        "channel": "{channel}"
+      }
+    },
+    {
+      "name": "ReactiveUI.Binding.SourceGenerators",
+      "dependsOn": ["Primitives", "splat"]
+    },
+    {
+      "name": "ReactiveUI.SourceGenerators",
+      "dependsOn": []
+    },
+    {
+      "name": "ReactiveUI",
+      "dependsOn": ["Primitives", "splat", "ReactiveUI.Binding.SourceGenerators", "ReactiveUI.SourceGenerators"],
+      "releaseInputs": {
+        "bump": "{bump}",
+        "channel": "{channel}"
+      }
+    },
+    {
+      "name": "ReactiveUI.Avalonia",
+      "dependsOn": ["Primitives", "splat", "ReactiveUI"],
+      "releaseInputs": {
+        "bump": "{bump}",
+        "channel": "{channel}"
+      }
+    },
+    {
+      "name": "ReactiveUI.Validation",
+      "dependsOn": ["splat", "ReactiveUI"]
+    },
+    {
+      "name": "Akavache",
+      "dependsOn": ["Primitives", "splat", "ReactiveUI", "ReactiveUI.SourceGenerators"]
+    },
+    {
+      "name": "Fusillade",
+      "dependsOn": ["Primitives", "splat", "punchclock", "Akavache"]
+    },
+    {
+      "name": "ReactiveUI.Uno",
+      "dependsOn": ["Primitives", "splat", "ReactiveUI", "ReactiveUI.SourceGenerators"],
+      "releaseInputs": {
+        "bump": "{bump}",
+        "channel": "{channel}"
+      }
+    },
+    {
+      "name": "Sextant",
+      "dependsOn": ["ReactiveUI", "ReactiveUI.Avalonia"]
+    },
+    {
+      "name": "Splat.DI.SourceGenerator",
+      "dependsOn": ["splat", "ReactiveUI", "ReactiveUI.SourceGenerators"]
+    },
+    {
+      "name": "Maui.Plugins.Popup",
+      "dependsOn": ["ReactiveUI"]
+    }
+  ]
+}
