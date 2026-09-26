@@ -21,7 +21,7 @@
 //   --avd <name>              The AVD to boot. Default: rxui-device-tests, created when missing.
 //   --system-image <package>  The system image for a created AVD. Default: system-images;android-36;google_apis;<host abi>.
 //   --port <number>           The emulator console port, which fixes its adb serial. Default: 5580.
-//   --boot-timeout <minutes>  Time allowed for the emulator to boot. Default: 10.
+//   --boot-timeout <minutes>  Time allowed for the emulator to boot. Default: 15.
 //
 // iOS options:
 //   --device-type <name>      The simulator device type. Default: the newest iPhone the runtime offers.
@@ -107,6 +107,12 @@ internal static class Android
             return 3;
         }
 
+        if (OperatingSystem.IsLinux() && !CanOpenReadWrite("/dev/kvm"))
+        {
+            Console.WriteLine("::error::/dev/kvm exists but this user cannot open it. Add the user to the kvm group, or on a GitHub runner add a udev rule that opens it (MODE=\"0666\").");
+            return 3;
+        }
+
         if (FindSdk() is not { } sdk)
         {
             Console.WriteLine("::error::No Android SDK found. Set ANDROID_HOME or ANDROID_SDK_ROOT.");
@@ -132,6 +138,14 @@ internal static class Android
         var avd = options.Get("avd") ?? "rxui-device-tests";
         var abi = RuntimeInformation.OSArchitecture is Architecture.Arm64 ? "arm64-v8a" : "x86_64";
         var image = options.Get("system-image") ?? $"system-images;android-36;google_apis;{abi}";
+
+        // avdmanager and the emulator can disagree on where AVDs live (hosted runners set ANDROID_USER_HOME and
+        // ANDROID_SDK_HOME differently), so pin one folder for every child process.
+        var avdHome = GetEnvironmentVariable("ANDROID_AVD_HOME") is { Length: > 0 } configured
+            ? configured
+            : Path.Combine(GetFolderPath(SpecialFolder.UserProfile), ".android", "avd");
+        Directory.CreateDirectory(avdHome);
+        SetEnvironmentVariable("ANDROID_AVD_HOME", avdHome);
 
         if (!AvdExists(emulator, avd))
         {
@@ -160,6 +174,12 @@ internal static class Android
                     return 4;
                 }
             }
+
+            if (!AvdExists(emulator, avd))
+            {
+                Console.WriteLine($"::error::avdmanager reported success, but the emulator cannot find '{avd}' in {avdHome}.");
+                return 4;
+            }
         }
 
         if (Adb(adb, serial, "get-state") is { ExitStatus.ExitCode: 0 })
@@ -168,14 +188,17 @@ internal static class Android
             return 4;
         }
 
-        using var emulatorLog = File.OpenHandle(Path.Combine(results, "emulator.log"), FileMode.Create, FileAccess.Write);
+        var emulatorLogPath = Path.Combine(results, "emulator.log");
+        using var emulatorLog = File.OpenHandle(emulatorLogPath, FileMode.Create, FileAccess.Write);
         Console.WriteLine($"Booting {avd} as {serial}");
 
-        // -read-only lets this run share an AVD with a copy the developer already has open.
-        _ = Process.StartAndForget(new ProcessStartInfo(
+        // -read-only lets this run share an AVD with a copy the developer already has open. The memory and core counts
+        // fit a hosted runner and cut a cold boot's time.
+        var emulatorPid = Process.StartAndForget(new ProcessStartInfo(
             emulator,
             ["-avd", avd, "-port", port.ToString(CultureInfo.InvariantCulture), "-no-window", "-no-audio", "-no-boot-anim",
-             "-gpu", "swiftshader_indirect", "-no-snapshot", "-read-only", "-camera-back", "none", "-camera-front", "none"])
+             "-gpu", "swiftshader_indirect", "-no-snapshot", "-read-only", "-no-metrics", "-memory", "4096", "-cores", "4",
+             "-camera-back", "none", "-camera-front", "none"])
         {
             StartDetached = true,
             StandardInputHandle = File.OpenNullHandle(),
@@ -193,9 +216,12 @@ internal static class Android
 
         try
         {
-            if (!WaitForBoot(adb, serial, TimeSpan.FromMinutes(options.GetInt("boot-timeout", 10))))
+            if (!WaitForBoot(adb, serial, emulatorPid, TimeSpan.FromMinutes(options.GetInt("boot-timeout", 15))))
             {
-                Console.WriteLine($"::error::{serial} did not finish booting. See emulator.log in the results.");
+                Console.WriteLine($"::error::{serial} did not finish booting. emulator.log follows.");
+                Console.WriteLine($"::group::emulator.log");
+                Console.WriteLine(ReadShared(emulatorLogPath));
+                Console.WriteLine("::endgroup::");
                 return 4;
             }
 
@@ -276,11 +302,51 @@ internal static class Android
     private static ProcessTextOutput Adb(string adb, string serial, params IEnumerable<string> arguments) =>
         Process.RunAndCaptureText(adb, ["-s", serial, .. arguments], TimeSpan.FromMinutes(2));
 
-    private static bool WaitForBoot(string adb, string serial, TimeSpan timeout)
+    private static bool IsRunning(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static bool CanOpenReadWrite(string path)
+    {
+        try
+        {
+            using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.ReadWrite);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static string ReadShared(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>Waits for the boot to complete, and gives up early when the emulator process has already exited.</summary>
+    private static bool WaitForBoot(string adb, string serial, int emulatorPid, TimeSpan timeout)
     {
         var started = Stopwatch.GetTimestamp();
         while (Stopwatch.GetElapsedTime(started) < timeout)
         {
+            if (!IsRunning(emulatorPid))
+            {
+                Console.WriteLine($"::error::The emulator exited before {serial} booted.");
+                return false;
+            }
+
             if (Adb(adb, serial, "shell", "getprop", "sys.boot_completed") is { ExitStatus.ExitCode: 0, StandardOutput: var booted } && booted.Trim() is "1")
             {
                 Console.WriteLine($"{serial} booted in {Stopwatch.GetElapsedTime(started).TotalSeconds:0}s");
