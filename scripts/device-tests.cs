@@ -511,7 +511,7 @@ internal static class Frameworks
     /// <summary>Returns the project's first target framework for <paramref name="platform"/>, such as <c>net11.0-android37</c>.</summary>
     public static string? Find(string project, string platform) =>
         Process.RunAndCaptureText("dotnet", ["msbuild", project, "-getProperty:TargetFrameworks", "-getProperty:TargetFramework", "-nologo"]) is { ExitStatus.ExitCode: 0, StandardOutput: var output }
-            ? JsonDocument.Parse(output).RootElement.GetProperty("Properties").EnumerateObject()
+            ? JsonElement.Parse(output).GetProperty("Properties").EnumerateObject()
                 .SelectMany(static p => (p.Value.GetString() ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                 .FirstOrDefault(tfm => tfm.Contains($"-{platform}", StringComparison.OrdinalIgnoreCase))
             : null;
