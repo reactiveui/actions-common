@@ -1,0 +1,192 @@
+name: Common device tests
+
+# Runs device test apps on a headless Android emulator (Linux) and an iOS simulator (macOS) through
+# scripts/device-tests.cs, the same script a developer runs locally. Each leg uploads its TRX report and device logs.
+#
+# The script is checked out from this repository at the commit of this workflow file (job.workflow_sha), so a caller
+# pinned to a branch or tag runs the matching script. actionlint 1.7.12 does not know job.workflow_sha yet and reports
+# it as undefined (rhysd/actionlint#707); GitHub documents it in the job context.
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        type: string
+        required: true
+        description: 'Newline-separated device test projects (.csproj), relative to the repository root'
+      configuration:
+        type: string
+        default: 'Release'
+        description: 'Build configuration'
+      dotnetVersions:
+        type: string
+        default: |
+          8.0.x
+          9.0.x
+          10.0.x
+          11.0.x
+        description: 'Newline-separated list of .NET SDKs'
+      srcFolder:
+        type: string
+        default: 'src'
+        description: 'Folder containing the solution, used to restore workloads'
+      solutionFile:
+        type: string
+        default: ''
+        description: 'Solution file relative to srcFolder, used to restore workloads'
+      runAndroid:
+        type: boolean
+        default: true
+        description: 'Run the Android leg'
+      runIos:
+        type: boolean
+        default: true
+        description: 'Run the iOS leg'
+      androidFramework:
+        type: string
+        default: 'net11.0-android'
+        description: 'Target framework of the Android head'
+      androidApiLevel:
+        type: string
+        default: '36'
+        description: 'Android API level of the emulator system image'
+      iosFramework:
+        type: string
+        default: 'net11.0-ios'
+        description: 'Target framework of the iOS head'
+      iosDeviceType:
+        type: string
+        default: ''
+        description: 'Simulator device type, such as "iPhone 16". Empty = the newest iPhone the runtime offers.'
+      testTimeout:
+        type: string
+        default: '30'
+        description: 'Minutes each test app may run before the script stops it'
+
+permissions:
+  contents: read
+
+jobs:
+  # Fixed job names keep the checks stable for branch protection. A leg turned off by its input reports as skipped,
+  # which passes a required check.
+  android:
+    name: device-tests (android)
+    if: inputs.runAndroid
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout device-tests script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: reactiveui/actions-common
+          ref: ${{ job.workflow_sha }}
+          path: .device-tests-tooling
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      # The hosted runner has KVM, but only root can open /dev/kvm until a udev rule opens it to the runner user.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install the emulator and system image
+        shell: bash
+        env:
+          API_LEVEL: ${{ inputs.androidApiLevel }}
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools "system-images;android-$API_LEVEL;google_apis;x86_64"
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: true
+
+      - name: Run Android device tests
+        shell: bash
+        env:
+          PROJECTS: ${{ inputs.projects }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          FRAMEWORK: ${{ inputs.androidFramework }}
+          API_LEVEL: ${{ inputs.androidApiLevel }}
+          TEST_TIMEOUT: ${{ inputs.testTimeout }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run --file "$GITHUB_WORKSPACE/.device-tests-tooling/scripts/device-tests.cs" -- android \
+            --project "$PROJECTS" --workspace "$GITHUB_WORKSPACE" \
+            --configuration "$CONFIGURATION" --framework "$FRAMEWORK" --timeout "$TEST_TIMEOUT" \
+            --system-image "system-images;android-$API_LEVEL;google_apis;x86_64" \
+            --results "$GITHUB_WORKSPACE/device-test-results/android"
+
+      - name: Upload Android results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: device-tests-android
+          path: device-test-results/android
+          if-no-files-found: warn
+          retention-days: 14
+
+  ios:
+    name: device-tests (ios)
+    if: inputs.runIos
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout device-tests script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: reactiveui/actions-common
+          ref: ${{ job.workflow_sha }}
+          path: .device-tests-tooling
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.solutionFile }}
+          install-workloads: true
+
+      - name: Run iOS device tests
+        shell: bash
+        env:
+          PROJECTS: ${{ inputs.projects }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          FRAMEWORK: ${{ inputs.iosFramework }}
+          DEVICE_TYPE: ${{ inputs.iosDeviceType }}
+          TEST_TIMEOUT: ${{ inputs.testTimeout }}
+        run: |
+          cd "$RUNNER_TEMP" && dotnet run --file "$GITHUB_WORKSPACE/.device-tests-tooling/scripts/device-tests.cs" -- ios \
+            --project "$PROJECTS" --workspace "$GITHUB_WORKSPACE" \
+            --configuration "$CONFIGURATION" --framework "$FRAMEWORK" --timeout "$TEST_TIMEOUT" \
+            --device-type "$DEVICE_TYPE" \
+            --results "$GITHUB_WORKSPACE/device-test-results/ios"
+
+      - name: Upload iOS results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: device-tests-ios
+          path: device-test-results/ios
+          if-no-files-found: warn
+          retention-days: 14

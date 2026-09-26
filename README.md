@@ -19,6 +19,7 @@ shared pieces that do that work. Each repository calls them instead of keeping i
 - [Why there is no dependency cache](#why-there-is-no-dependency-cache)
 - [Coverage from three operating systems](#coverage-from-three-operating-systems)
 - [WinUI tests](#winui-tests)
+- [Device tests](#device-tests)
 
 ## What this repository gives you
 
@@ -71,6 +72,7 @@ This repository has no CI that runs the reusable workflows. The repositories tha
 | `workflow-common-aot-smoke.yml` | Publishes a native AOT test app on Windows, Linux and macOS and runs it. |
 | `workflow-common-benchmarks.yml` | Runs [BenchmarkDotNet](https://github.com/dotnet/BenchmarkDotNet) projects and writes the results to the run summary. |
 | `workflow-common-benchmarks-ab.yml` | Benchmarks two commits on one runner and marks each benchmark faster, slower or unresolved. |
+| `workflow-common-device-tests.yml` | Runs device test apps on an Android emulator (Linux) and an iOS simulator (macOS). See [Device tests](#device-tests). |
 
 The build, SonarCloud, CodeQL and AOT workflows skip work a change cannot affect. A push or pull request that only
 changes `.github` skips the build, tests, SonarCloud and the C# and JavaScript analysis. CodeQL analyses GitHub
@@ -327,6 +329,40 @@ Set `installWindowsAppRuntime: true` and the workflow installs it before the tes
 
 The runtime defaults to the latest stable `Microsoft.WindowsAppSDK` major.minor, which Renovate keeps current.
 Set `windowsAppRuntimeVersion` only to pin an older runtime.
+
+## Device tests
+
+A device test app runs a repository's Android or iOS platform code on a real emulator or simulator. The normal build
+cannot run it, so `workflow-common-device-tests.yml` runs it in two jobs:
+
+- **`device-tests (android)`** runs on Linux. It turns on KVM, installs the emulator and a system image, and boots a
+  headless emulator.
+- **`device-tests (ios)`** runs on macOS. It creates and boots a fresh iPhone simulator.
+
+Both jobs run [`scripts/device-tests.cs`](scripts/device-tests.cs) and upload the TRX report and device logs as an
+artifact. The job fails when a test fails. Turn a job off with `runAndroid: false` or `runIos: false`; a job turned
+off reports as skipped, which passes a required check.
+
+```yaml
+jobs:
+  device-tests:
+    uses: reactiveui/actions-common/.github/workflows/workflow-common-device-tests.yml@main
+    with:
+      projects: src/tests/MyLibrary.Device.Tests/MyLibrary.Device.Tests.csproj
+      solutionFile: MyLibrary.slnx
+```
+
+The script is the same one a developer runs locally, so a failure in CI reproduces on a desk:
+
+```bash
+dotnet run --file ../actions-common/scripts/device-tests.cs -- android --project src/tests/MyLibrary.Device.Tests/MyLibrary.Device.Tests.csproj
+```
+
+It needs the Android SDK and KVM for `android`, and macOS with Xcode for `ios`. It refuses a host that cannot run
+the platform. The header of the script lists every option and exit code.
+
+The workflow checks the script out at its own commit, so a caller that points at a branch of this repository runs
+that branch's script.
 
 ## Sponsors
 
