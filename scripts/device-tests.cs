@@ -564,18 +564,38 @@ internal static class Apple
         Process.RunAndCaptureText("dotnet", ["msbuild", project, $"-getProperty:{property}", .. buildProperties, "-nologo"])
             is { ExitStatus.ExitCode: 0, StandardOutput: var value } && value.Trim() is { Length: > 0 } trimmed ? trimmed : null;
 
-    // The build writes exactly one .app folder into the project's output path for a simulator runtime identifier.
+    // Looks for the .app folder the build wrote: first in the evaluated output path, then anywhere under the project's
+    // bin folder (the newest one wins). Prints what it searched when it finds nothing, so a CI failure explains itself.
     private static string? FindAppBundle(string project, string? outputPath)
     {
-        if (outputPath is null)
+        var projectDirectory = Path.GetDirectoryName(Path.GetFullPath(project))!;
+        var outputDirectory = outputPath is null ? null : Path.GetFullPath(outputPath, projectDirectory);
+        if (outputDirectory is not null && Directory.Exists(outputDirectory)
+            && Directory.EnumerateDirectories(outputDirectory, "*.app", SearchOption.TopDirectoryOnly).FirstOrDefault() is { } direct)
         {
-            return null;
+            return direct;
         }
 
-        var directory = Path.GetFullPath(outputPath, Path.GetDirectoryName(Path.GetFullPath(project))!);
-        return Directory.Exists(directory)
-            ? Directory.EnumerateDirectories(directory, "*.app", SearchOption.TopDirectoryOnly).SingleOrDefault()
+        var binDirectory = Path.Combine(projectDirectory, "bin");
+        var found = Directory.Exists(binDirectory)
+            ? Directory.EnumerateDirectories(binDirectory, "*.app", SearchOption.AllDirectories)
+                .Where(static path => !Path.GetDirectoryName(path)!.EndsWith(".app", StringComparison.Ordinal))
+                .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                .FirstOrDefault()
             : null;
+        if (found is null)
+        {
+            Console.WriteLine($"No .app folder found. OutputPath evaluated to '{outputPath}' ({outputDirectory}); searched {binDirectory}.");
+            if (Directory.Exists(binDirectory))
+            {
+                foreach (var directory in Directory.EnumerateDirectories(binDirectory, "*", SearchOption.AllDirectories).Take(40))
+                {
+                    Console.WriteLine($"  {Path.GetRelativePath(projectDirectory, directory)}");
+                }
+            }
+        }
+
+        return found;
     }
 
     private static void Shutdown(string udid, Options options)
