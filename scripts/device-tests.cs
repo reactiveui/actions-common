@@ -360,10 +360,13 @@ internal static class Apple
             return 3;
         }
 
-        var deviceType = options.Get("device-type") ?? json.RootElement.GetProperty("devicetypes").EnumerateArray()
+        // Only the runtime's own supported device types boot on it; the newest iPhone is listed last.
+        var deviceType = options.Get("device-type") ?? json.RootElement.GetProperty("runtimes").EnumerateArray()
+            .Where(r => r.GetProperty("identifier").GetString() == runtime && r.TryGetProperty("supportedDeviceTypes", out _))
+            .SelectMany(static r => r.GetProperty("supportedDeviceTypes").EnumerateArray())
+            .Where(static d => d.GetProperty("productFamily").GetString() is "iPhone")
             .Select(static d => d.GetProperty("name").GetString()!)
-            .Where(static name => name.StartsWith("iPhone", StringComparison.Ordinal) && !name.Contains(" SE", StringComparison.Ordinal))
-            .LastOrDefault();
+            .LastOrDefault(static name => !name.Contains(" SE", StringComparison.Ordinal));
         if (deviceType is null)
         {
             Console.WriteLine("::error::No iPhone simulator device type is available.");
