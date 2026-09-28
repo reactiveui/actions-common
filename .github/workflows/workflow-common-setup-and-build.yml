@@ -80,6 +80,11 @@ on:
         default: ''
         description: 'Optional solution or solution filter, relative to srcFolder, whose projects need MSBuild (e.g. Uno.Sdk projects). It builds and tests in its own Windows job with MSBuild while solutionFile keeps the dotnet flow on every OS. Empty = no MSBuild job.'
 
+      msbuildPerformTests:
+        type: boolean
+        default: true
+        description: 'Run tests in the MSBuild job. Set false when msbuildSolutionFile holds no test project, since dotnet test fails when it finds none.'
+
       installWindowsAppRuntime:
         type: boolean
         default: false
@@ -334,7 +339,7 @@ jobs:
           solution-file: ${{ inputs.msbuildSolutionFile }}
 
       - name: Test
-        if: inputs.performTests == true
+        if: inputs.performTests == true && inputs.msbuildPerformTests == true
         uses: reactiveui/actions-common/.github/actions/dotnet-test@main
         with:
           configuration: ${{ inputs.configuration }}
