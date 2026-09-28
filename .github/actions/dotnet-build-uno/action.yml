@@ -35,16 +35,17 @@ runs:
       with:
         vs-prerelease: true
 
+    # PowerShell resolves msbuild from the PATH setup-msbuild adds; Git Bash did not find it on the Visual Studio 18 image.
     - name: Build and pack UNO solution with MSBuild
-      shell: bash
+      shell: pwsh
       env:
-        # Git Bash rewrites path-like arguments, mangling the /t: and /p: switches.
-        MSYS2_ARG_CONV_EXCL: '*'
         CONFIGURATION: ${{ inputs.configuration }}
         SOLUTION_FILE: ${{ inputs.solution-file }}
         PACKAGE_OUTPUT: ${{ inputs.package-output }}
       run: |
-        output=()
-        if [ -n "$PACKAGE_OUTPUT" ]; then output=("/p:PackageOutputPath=$PACKAGE_OUTPUT"); fi
-        msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal "/p:Configuration=$CONFIGURATION" "${output[@]}" $SOLUTION_FILE
+        $arguments = @('/t:build,pack', '/nowarn:MSB4011', '/maxcpucount', '/p:NoPackageAnalysis=true', '/verbosity:minimal', "/p:Configuration=$env:CONFIGURATION")
+        if ($env:PACKAGE_OUTPUT) { $arguments += "/p:PackageOutputPath=$env:PACKAGE_OUTPUT" }
+        if ($env:SOLUTION_FILE) { $arguments += $env:SOLUTION_FILE }
+        msbuild @arguments
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       working-directory: ${{ inputs.src-folder }}
