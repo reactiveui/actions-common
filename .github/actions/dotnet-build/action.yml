@@ -23,11 +23,14 @@ runs:
   using: composite
   steps:
     # SOLUTION_FILE stays unquoted so an empty value passes no argument.
+    # Restore in the build configuration: a package reference can depend on it, as Uno.Sdk's DevServer does on
+    # Optimize, and a Debug restore followed by a Release build imports the wrong package targets.
     - name: Restore NuGet packages
       shell: bash
       env:
+        CONFIGURATION: ${{ inputs.configuration }}
         SOLUTION_FILE: ${{ inputs.solution-file }}
-      run: dotnet restore $SOLUTION_FILE
+      run: dotnet restore -p:Configuration="$CONFIGURATION" $SOLUTION_FILE
       working-directory: ${{ inputs.src-folder }}
 
     - name: Build solution with dotnet CLI

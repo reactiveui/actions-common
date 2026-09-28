@@ -23,11 +23,14 @@ runs:
   using: composite
   steps:
     # SOLUTION_FILE stays unquoted so an empty value passes no argument.
+    # Restore in the build configuration: Uno.Sdk references its DevServer package with assets only when Optimize is
+    # off, and a Debug restore followed by a Release build fails with UNOB0019.
     - name: Restore NuGet packages
       shell: bash
       env:
+        CONFIGURATION: ${{ inputs.configuration }}
         SOLUTION_FILE: ${{ inputs.solution-file }}
-      run: dotnet restore $SOLUTION_FILE
+      run: dotnet restore -p:Configuration="$CONFIGURATION" $SOLUTION_FILE
       working-directory: ${{ inputs.src-folder }}
 
     - name: Add MSBuild to PATH (Visual Studio)
