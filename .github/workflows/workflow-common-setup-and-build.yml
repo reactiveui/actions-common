@@ -75,6 +75,11 @@ on:
         default: false
         description: 'Enable UNO-specific steps on Windows (msbuild/pack flow)'
 
+      msbuildSolutionFile:
+        type: string
+        default: ''
+        description: 'Optional solution or solution filter, relative to srcFolder, whose projects need MSBuild (e.g. Uno.Sdk projects). It builds and tests in its own Windows job with MSBuild while solutionFile keeps the dotnet flow on every OS. Empty = no MSBuild job.'
+
       installWindowsAppRuntime:
         type: boolean
         default: false
@@ -296,12 +301,56 @@ jobs:
           test-timeout: ${{ inputs.testTimeout }}
           test-projects: ${{ inputs.testProjects }}
 
+  # Projects that only MSBuild can build, such as Uno.Sdk projects, build and test here so the rest keep the dotnet flow.
+  build-msbuild:
+    needs: changes
+    if: ${{ !cancelled() && inputs.msbuildSolutionFile != '' && needs.changes.outputs.code != 'false' }}
+    runs-on: windows-latest
+    env:
+      DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET Environment
+        uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          dotnet-versions: ${{ inputs.dotnetVersions }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.msbuildSolutionFile }}
+          install-workloads: ${{ inputs.installWorkloads }}
+          minver-tag-prefix: ${{ inputs.minverTagPrefix }}
+          minver-minimum-major-minor: ${{ inputs.minverMinimumMajorMinor }}
+          minver-auto-increment: ${{ inputs.minverAutoIncrement }}
+          minver-default-pre-release-identifiers: ${{ inputs.minverDefaultPreReleaseIdentifiers }}
+
+      - name: Build (MSBuild)
+        uses: reactiveui/actions-common/.github/actions/dotnet-build-uno@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.msbuildSolutionFile }}
+
+      - name: Test
+        if: inputs.performTests == true
+        uses: reactiveui/actions-common/.github/actions/dotnet-test@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.msbuildSolutionFile }}
+          enable-detailed-test-logging: ${{ inputs.enableDetailedTestLogging }}
+          test-timeout: ${{ inputs.testTimeout }}
+          artifact-suffix: '-msbuild'
+
   # The results are checked directly because the changes job skips on events other than push and pull_request.
   collect-coverage:
     needs:
       - build-windows
       - build-unix
-    if: ${{ !cancelled() && inputs.performTests == true && needs.build-windows.result == 'success' && needs.build-unix.result == 'success' }}
+      - build-msbuild
+    if: ${{ !cancelled() && inputs.performTests == true && needs.build-windows.result == 'success' && needs.build-unix.result == 'success' && (needs.build-msbuild.result == 'success' || needs.build-msbuild.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (for PR summary context)

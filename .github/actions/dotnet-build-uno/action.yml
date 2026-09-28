@@ -14,6 +14,10 @@ inputs:
     description: 'Solution file relative to src-folder'
     required: false
     default: ''
+  package-output:
+    description: 'Optional absolute folder the packed packages are written to. Empty = each project''s own output folder.'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -38,5 +42,9 @@ runs:
         MSYS2_ARG_CONV_EXCL: '*'
         CONFIGURATION: ${{ inputs.configuration }}
         SOLUTION_FILE: ${{ inputs.solution-file }}
-      run: msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal "/p:Configuration=$CONFIGURATION" $SOLUTION_FILE
+        PACKAGE_OUTPUT: ${{ inputs.package-output }}
+      run: |
+        output=()
+        if [ -n "$PACKAGE_OUTPUT" ]; then output=("/p:PackageOutputPath=$PACKAGE_OUTPUT"); fi
+        msbuild /t:build,pack /nowarn:MSB4011 /maxcpucount /p:NoPackageAnalysis=true /verbosity:minimal "/p:Configuration=$CONFIGURATION" "${output[@]}" $SOLUTION_FILE
       working-directory: ${{ inputs.src-folder }}

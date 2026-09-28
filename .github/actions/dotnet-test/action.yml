@@ -26,6 +26,10 @@ inputs:
     description: 'Optional newline-separated globs, relative to the solution folder, choosing which of the solution''s projects to test (e.g. "tests/**/*.csproj"). A line starting with "!" excludes matches. Empty = every test project in the solution.'
     required: false
     default: ''
+  artifact-suffix:
+    description: 'Optional suffix for the coverage and diagnostic artifact names, so a second test job on the same OS does not collide (e.g. "-msbuild").'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -77,6 +81,7 @@ runs:
         string[] solution = solutionPath is null ? [] : ["--solution", solutionPath];
 
         string[] patterns = testProjects.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        string[]? filteredProjects = null;
         if (patterns is not [])
         {
             if (solutionPath is null)
@@ -90,9 +95,18 @@ runs:
             matcher.AddIncludePatterns(patterns.Where(static p => !p.StartsWith('!')));
             matcher.AddExcludePatterns(patterns.Where(static p => p.StartsWith('!')).Select(static p => p[1..]));
 
+            // A solution filter lists its projects relative to its base solution, so match against that solution.
+            if (solutionPath.EndsWith(".slnf", StringComparison.OrdinalIgnoreCase))
+            {
+                using JsonDocument filter = JsonDocument.Parse(File.ReadAllText(solutionPath));
+                string basePath = filter.RootElement.GetProperty("solution").GetProperty("path").GetString()!;
+                filteredProjects = [.. filter.RootElement.GetProperty("solution").GetProperty("projects").EnumerateArray().Select(static p => p.GetString()!)];
+                solutionPath = Path.Combine(Path.GetDirectoryName(solutionPath) ?? string.Empty, basePath);
+            }
+
             string root = Path.GetDirectoryName(Path.GetFullPath(solutionPath))!;
             Dictionary<string, string> listed = [with(StringComparer.OrdinalIgnoreCase)];
-            foreach (string project in SolutionProjects(solutionPath))
+            foreach (string project in filteredProjects ?? SolutionProjects(solutionPath))
             {
                 listed[project.Replace('\\', '/')] = project;
             }
@@ -157,7 +171,7 @@ runs:
     - name: Upload per-OS coverage reports as build artifacts
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
-        name: tmp-coverage-${{ runner.os }}
+        name: tmp-coverage-${{ runner.os }}${{ inputs.artifact-suffix }}
         path: |
           ${{ inputs.src-folder }}/**/coverage.cobertura.xml
           ${{ inputs.src-folder }}/**/coverage*.cobertura.xml
@@ -169,7 +183,7 @@ runs:
       if: always() && inputs.enable-detailed-test-logging == 'true'
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
-        name: mtp-diagnostic-logs-${{ runner.os }}
+        name: mtp-diagnostic-logs-${{ runner.os }}${{ inputs.artifact-suffix }}
         path: |
           ${{ inputs.src-folder }}/**/TestResults/**/*.diag
           ${{ inputs.src-folder }}/**/TestResults/**/log_*.diag

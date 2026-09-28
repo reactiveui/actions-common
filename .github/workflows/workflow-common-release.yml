@@ -61,6 +61,11 @@ on:
         default: false
         description: 'Enable UNO-specific msbuild/pack flow (Windows only)'
 
+      msbuildSolutionFile:
+        type: string
+        default: ''
+        description: 'Optional solution or solution filter, relative to srcFolder, whose projects need MSBuild (e.g. Uno.Sdk projects). Built and packed with MSBuild after the dotnet pack, into the same package set that is signed and published. Needs a Windows buildOs. Empty = none.'
+
       signingTimestampUrl:
         type: string
         default: 'http://time.certum.pl'
@@ -265,6 +270,15 @@ jobs:
           CONFIGURATION: ${{ inputs.configuration }}
           SOLUTION_FILE: ${{ inputs.solutionFile }}
         run: dotnet pack --no-restore --configuration "$CONFIGURATION" $SOLUTION_FILE -o "${GITHUB_WORKSPACE}/packages"
+
+      - name: Build and pack (MSBuild)
+        if: inputs.msbuildSolutionFile != ''
+        uses: reactiveui/actions-common/.github/actions/dotnet-build-uno@main
+        with:
+          configuration: ${{ inputs.configuration }}
+          src-folder: ${{ inputs.srcFolder }}
+          solution-file: ${{ inputs.msbuildSolutionFile }}
+          package-output: ${{ github.workspace }}/packages
 
       - name: Upload unsigned packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
