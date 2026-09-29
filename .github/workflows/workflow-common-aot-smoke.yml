@@ -4,7 +4,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: common-aot-smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  # The project file keeps two smoke calls from one caller workflow from cancelling each other.
+  group: common-aot-smoke-${{ github.workflow }}-${{ inputs.projectFile }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
