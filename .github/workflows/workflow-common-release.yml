@@ -298,7 +298,7 @@ jobs:
     # SimplySign has no headless API; certum-sign drives its GUI under Xvfb, which needs Linux.
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/reactiveui/certum-signer:latest@sha256:7a77f04d311a937d1a724058a845dc09107bd79937281d86a43238c3e677413b
+      image: ghcr.io/reactiveui/certum-signer:latest@sha256:5b2b171610dd0fbc381e31368d1a801b11d654b74c850ab2b133e8b86334e15c
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
