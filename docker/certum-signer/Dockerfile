@@ -43,7 +43,7 @@ FROM mcr.microsoft.com/dotnet/sdk:11.0-resolute@sha256:78559d13d8c810bfe87f32916
 
 # SimplySign Desktop Linux (Ubuntu) installer. No Renovate datasource exists for
 # Certum's file host, so bump this manually when Certum ships a new version.
-ARG SIMPLYSIGN_BIN_URL=https://files.certum.eu/software/SimplySignDesktop/Linux-Ubuntu/2.9.14-9.4.3.0/SimplySignDesktop-2.9.14-9.4.3.0-x86_64-prod-ubuntu.bin
+ARG SIMPLYSIGN_BIN_URL=https://files.certum.eu/software/SimplySignDesktop/Linux-Ubuntu/2.9.15-9.4.5.0/SimplySignDesktop-2.9.15-9.4.5.0-x86_64-prod-ubuntu.bin
 # renovate: datasource=maven depName=net.jsign:jsign
 ARG JSIGN_VERSION=7.5
 
