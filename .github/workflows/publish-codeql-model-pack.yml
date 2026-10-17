@@ -34,75 +34,20 @@ jobs:
           stamp-version: 'false'
 
       - name: Install the CodeQL CLI
+        shell: bash
         run: |
-          set -euxo pipefail
           gh extension install github/gh-codeql
           gh codeql set-version latest
 
       - name: Stamp pack version
-        shell: bash
-        run: |
-          cd "$RUNNER_TEMP" && dotnet run - -- "$PACK_DIR" <<'CS'
-          using System.Diagnostics;
-          using static System.Environment;
-
-          if (args is not [var packDir])
-          {
-              Console.WriteLine("::error::Expected the pack directory argument.");
-              return 2;
-          }
-
-          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
-
-          var qlpack = Path.Combine(packDir, "qlpack.yml");
-          var lines = File.ReadAllLines(qlpack);
-          if (Array.FindIndex(lines, line => line.StartsWith("version:", StringComparison.Ordinal)) is not (>= 0 and var index)
-              || lines[index]["version:".Length..].Trim().Split('.') is not [var major, var minor, _])
-          {
-              Console.WriteLine($"::error::{qlpack} needs a top-level major.minor.patch version.");
-              return 1;
-          }
-
-          if (Process.RunAndCaptureText("git", ["rev-list", "--count", "HEAD", "--", packDir]) is not { ExitStatus.ExitCode: 0, StandardOutput: var commits })
-          {
-              Console.WriteLine("::error::Could not count the commits that touched the pack.");
-              return 1;
-          }
-
-          lines[index] = $"version: {major}.{minor}.{commits.Trim()}";
-          File.WriteAllLines(qlpack, lines);
-          Console.WriteLine($"Publishing {lines[index]}");
-          return 0;
-          CS
+        uses: reactiveui/actions-common/.github/actions/codeql-pack-version@main
+        with:
+          pack-dir: ${{ env.PACK_DIR }}
 
       - name: Resolve pack dependencies
         run: gh codeql pack install "$PACK_DIR"
 
       - name: Publish pack
-        shell: bash
-        run: |
-          cd "$RUNNER_TEMP" && dotnet run - -- "$PACK_DIR" <<'CS'
-          using System.Diagnostics;
-          using static System.Environment;
-
-          if (args is not [var packDir])
-          {
-              Console.WriteLine("::error::Expected the pack directory argument.");
-              return 2;
-          }
-
-          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
-
-          var publish = Process.RunAndCaptureText("gh", ["codeql", "pack", "publish", packDir]);
-          Console.Write(publish.StandardOutput);
-          Console.Error.Write(publish.StandardError);
-
-          // A re-run of an already-published commit carries the same version.
-          if (publish is { ExitStatus.ExitCode: not 0 } && (publish.StandardOutput + publish.StandardError).Contains("already exists", StringComparison.Ordinal))
-          {
-              Console.WriteLine("::notice::This pack version is already published.");
-              return 0;
-          }
-
-          return publish.ExitStatus.ExitCode;
-          CS
+        uses: reactiveui/actions-common/.github/actions/codeql-pack-publish@main
+        with:
+          pack-dir: ${{ env.PACK_DIR }}

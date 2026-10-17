@@ -12,7 +12,7 @@ shared pieces that do that work. Each repository calls them instead of keeping i
 - [Composite actions](#composite-actions)
 - [Steps are written in C#](#steps-are-written-in-c)
 - [How a version is chosen](#how-a-version-is-chosen)
-- [The signer image](#the-signer-image)
+- [Package signing](#package-signing)
 - [The CodeQL pack](#the-codeql-pack)
 - [The release train](#the-release-train)
 - [How dependencies stay current](#how-dependencies-stay-current)
@@ -27,7 +27,6 @@ shared pieces that do that work. Each repository calls them instead of keeping i
   is a whole GitHub Actions workflow that another repository runs with `uses:`.
 - **Composite actions.** A [composite action](https://docs.github.com/en/actions/sharing-automations/creating-actions/creating-a-composite-action)
   is a group of steps that a workflow runs as one step.
-- **A signer image.** This container image signs NuGet packages with the organisation's code-signing certificate.
 - **A CodeQL pack.** This pack tells CodeQL to trust actions published by this organisation.
 
 ## Calling a workflow
@@ -63,7 +62,7 @@ This repository has no CI that runs the reusable workflows. The repositories tha
 | Workflow | What it does |
 |---|---|
 | `workflow-common-setup-and-build.yml` | Builds and tests on Windows, Linux and macOS, then uploads coverage to Codecov. |
-| `workflow-common-release.yml` | Chooses the release version, builds and packs, then signs the packages in the signer image. |
+| `workflow-common-release.yml` | Chooses the release version, builds and packs, then signs the packages with SafeSign. |
 | `workflow-common-release-unsigned.yml` | Builds and packs without signing. |
 | `workflow-common-create-release.yml` | Creates the GitHub release and its tag, with release notes and the packages attached. |
 | `workflow-common-publish-github-packages.yml` | Pushes packages to GitHub Packages. |
@@ -89,40 +88,38 @@ Actions only when something under `.github` changed. Skipped jobs still pass req
 | `minver` | Reads the version from git tags and exports it for the build. |
 | `compute-version-and-tag` | Works out the next release version from the latest release tag. |
 | `sonarcloud` | Starts a SonarCloud scan before the build and finishes it after the tests. |
-| `certum-sign` | Signs `.nupkg` files inside the signer image. |
+| `certum-sign` | Signs `.nupkg` files with the SafeSign tool and verifies them. |
 | `dotnet-benchmarks` | Checks out a commit and runs benchmark projects for the A/B workflow. |
 | `detect-changes` | Reports whether a push or pull request changes files under `.github`, files outside it, or both. |
 
 ## Steps are written in C#
 
-When a step needs more than one command, it runs a C# script. The .NET SDK reads the script from standard input
-with `dotnet run -`:
+Bash is fine for a sequence of plain commands. A step with branching, loops or parsing runs a C# script. The
+script is a `.cs` file next to the `action.yml` that runs it, and the step starts it with `dotnet run --file`:
 
 ```yaml
 - name: Resolve release tag
   shell: bash
   env:
-    VERSION_OVERRIDE: ${{ inputs.versionOverride }}
-    TAG_PREFIX: ${{ inputs.minverTagPrefix }}
-  run: |
-    cd "$RUNNER_TEMP" && dotnet run - -- "$VERSION_OVERRIDE" "$TAG_PREFIX" <<'CS'
-    if (args is not [var versionOverride, var tagPrefix])
-    {
-        return 2;
-    }
-
-    // ...
-    CS
+    VERSION_OVERRIDE: ${{ inputs.version-override }}
+    TAG_PREFIX: ${{ inputs.tag-prefix }}
+  working-directory: ${{ runner.temp }}
+  run: dotnet run --file "$GITHUB_ACTION_PATH/release-tag-resolve.cs" -- "$VERSION_OVERRIDE" "$TAG_PREFIX"
 ```
+
+A reusable workflow cannot read files in this repository. A workflow that needs logic calls a composite action
+instead, for example `uses: reactiveui/actions-common/.github/actions/release-tag-resolve@main`. Besides the
+actions above, this repository holds one small action for each such step, such as `release-inputs-validate`,
+`github-release-create`, `benchmark-run` and the `release-train-*` actions.
 
 Every script follows these rules:
 
 - **Inputs arrive through `env:`.** The step passes them to the script as arguments. The script text never
   contains `${{ }}`, so a value from a pull request cannot change the script's code.
-- **The script runs from `$RUNNER_TEMP`.** `dotnet run` reads `global.json` and `Directory.Build.props` from the
+- **The step runs from `$RUNNER_TEMP`.** `dotnet run` reads `global.json` and `Directory.Build.props` from the
   folder it runs in. The temp folder keeps the calling repository's settings out of the script.
 - **The script needs the .NET 11 SDK.** A job runs `dotnet-environment` before its first script.
-- **A script declares what it needs at the top.** For example, `#:package System.Management@*` adds a package.
+- **A script declares what it needs at the top.** For example, `#:package Name@Version` adds a package.
 
 ## How a version is chosen
 
@@ -134,34 +131,21 @@ Every script follows these rules:
 - **The tag comes last.** `workflow-common-create-release.yml` creates the tag at the commit that was built. A
   build or signing failure leaves no tag behind.
 
-## The signer image
+## Package signing
 
-`docker/certum-signer/Dockerfile` builds `ghcr.io/reactiveui/certum-signer`. The release workflow signs packages
-inside it.
+The release workflow signs NuGet packages with the organisation's Certum SimplySign certificate. The `certum-sign`
+action does the work on a standard `ubuntu-latest` runner.
 
-**Why it exists.** Certum SimplySign has no command-line signing. Its key is only reachable through the SimplySign
-Desktop app. The image runs that app on a virtual display and logs in with `xdotool`. It then signs with
-[jsign](https://github.com/ebourg/jsign) and checks the result with `dotnet nuget verify`.
+**How it signs.** The action installs the [SafeSign](https://www.nuget.org/packages/SafeSign/) .NET tool with
+`dotnet tool install --global`. SafeSign talks to the SimplySign cloud service directly. It needs no desktop app,
+virtual display or PKCS #11 library. The action then checks each package with `dotnet nuget verify`.
 
-**What it is built on.** The image starts from the .NET 11 SDK on Ubuntu 26.04, pinned by digest. It adds the
-.NET 10 SDK.
+**Which version.** The `safesign-version` input holds the SafeSign version. Renovate keeps it current.
 
-**Why it builds libxml2.** SimplySign ships its own copy of Qt 5.9. That Qt needs `libxml2.so.2`. Ubuntu 26.04
-only ships `libxml2.so.16`, the name
-[libxml2 2.14 moved to](https://discourse.gnome.org/t/libxml2-2-14-0-released/28025). So the image builds libxml2 2.13.9, the last release with `libxml2.so.2`. It also
-builds libxslt 1.1.43, the last release that works with that libxml2.
+**Which secrets.** The calling job maps `CERTUM_USER_ID`, `CERTUM_OTP_URI` and `CERTUM_CERT_FINGERPRINT` into its
+environment. SafeSign reads them from there.
 
-**How it catches a missing library.** The build runs `ldd` on SimplySign and its display plugin. The build fails
-if either one is missing a library.
-
-**One installer quirk.** The SimplySign installer stops every process whose command line contains
-`SimplySignDesktop`. The install step names the install folder only through `$SS_DIST` for that reason.
-
-**Who can pull it.** The image is private. A workflow that calls the release workflow grants `packages: read`.
-
-**When it rebuilds.** The image rebuilds when its Dockerfile changes on `main`, every Monday, and when you start
-the workflow by hand. The weekly rebuild picks up Ubuntu security fixes, .NET 10 patches and new SimplySign
-releases.
+**Which formats.** The action signs `.nupkg` files only.
 
 ## The CodeQL pack
 
@@ -306,8 +290,7 @@ and the rules in `.github/renovate.json`.
 - **Trusted updates merge on their own.** These are minor, patch and digest updates to those actions, and digest
   updates to `mcr.microsoft.com`, `ghcr.io/reactiveui` and `docker/dockerfile` images.
 - **`reactiveui/*` actions stay on `@main`.** Every repository picks up a shared change on its next run.
-- **The Dockerfile's jsign version is tracked** through its `# renovate:` comment. The SimplySign download has no
-  source Renovate can read, so you update it by hand.
+- **The SafeSign version is tracked** through the `# renovate:` comment in the `certum-sign` action.
 
 ## Why there is no dependency cache
 

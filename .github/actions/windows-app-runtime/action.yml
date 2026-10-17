@@ -1,0 +1,61 @@
+name: Windows App Runtime
+description: Install the Windows App SDK runtime, which WinUI test hosts need. Windows runners only.
+
+inputs:
+  version:
+    description: 'Windows App SDK major.minor whose runtime to install.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Check the requested version
+      id: input
+      shell: pwsh
+      env:
+        WINDOWS_APP_RUNTIME_VERSION: ${{ inputs.version }}
+      run: Add-Content -Path $env:GITHUB_OUTPUT -Value ('valid=' + ($env:WINDOWS_APP_RUNTIME_VERSION -match '^\d+\.\d+$'))
+
+    - name: Reject the requested version
+      if: steps.input.outputs.valid != 'True'
+      shell: pwsh
+      env:
+        WINDOWS_APP_RUNTIME_VERSION: ${{ inputs.version }}
+      run: Write-Error -Message "windowsAppRuntimeVersion must be <major>.<minor>, got '$env:WINDOWS_APP_RUNTIME_VERSION'."
+
+    - name: Look for the runtime
+      id: before
+      shell: pwsh
+      env:
+        WINDOWS_APP_RUNTIME_VERSION: ${{ inputs.version }}
+      run: Add-Content -Path $env:GITHUB_OUTPUT -Value ('registered=' + [bool](Get-AppxPackage -Name "Microsoft.WindowsAppRuntime.$env:WINDOWS_APP_RUNTIME_VERSION"))
+
+    - name: Download the Windows App Runtime installer
+      if: steps.before.outputs.registered != 'True'
+      shell: pwsh
+      env:
+        WINDOWS_APP_RUNTIME_VERSION: ${{ inputs.version }}
+      run: Invoke-WebRequest -Uri "https://aka.ms/windowsappsdk/$env:WINDOWS_APP_RUNTIME_VERSION/latest/windowsappruntimeinstall-x64.exe" -OutFile "$env:RUNNER_TEMP/windowsappruntimeinstall-x64.exe"
+
+    - name: Install Windows App Runtime
+      if: steps.before.outputs.registered != 'True'
+      shell: pwsh
+      run: '& "$env:RUNNER_TEMP/windowsappruntimeinstall-x64.exe" --quiet'
+
+    - name: Check the runtime is registered
+      id: after
+      shell: pwsh
+      env:
+        WINDOWS_APP_RUNTIME_VERSION: ${{ inputs.version }}
+      run: Add-Content -Path $env:GITHUB_OUTPUT -Value ('registered=' + [bool](Get-AppxPackage -Name "Microsoft.WindowsAppRuntime.$env:WINDOWS_APP_RUNTIME_VERSION"))
+
+    - name: List registered runtimes
+      shell: pwsh
+      run: Get-AppxPackage -Name 'Microsoft.WindowsAppRuntime*'
+
+    - name: Report a missing runtime
+      if: steps.after.outputs.registered != 'True'
+      shell: pwsh
+      env:
+        WINDOWS_APP_RUNTIME_VERSION: ${{ inputs.version }}
+      run: Write-Error -Message "Windows App Runtime $env:WINDOWS_APP_RUNTIME_VERSION install reported success but no runtime package is registered."

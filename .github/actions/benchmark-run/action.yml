@@ -1,0 +1,51 @@
+name: Benchmark run
+description: Run each BenchmarkDotNet project, exporting its reports into benchmark-artifacts in the workspace.
+
+inputs:
+  projects:
+    description: 'Newline-separated benchmark projects (.csproj), relative to src-folder. Blank lines are skipped.'
+    required: true
+  src-folder:
+    description: 'Folder holding the benchmark projects, relative to the workspace.'
+    required: false
+    default: 'src'
+  filter:
+    description: 'BenchmarkDotNet filter, passed through as --filter.'
+    required: false
+    default: '*'
+  configuration:
+    description: 'Build configuration.'
+    required: false
+    default: 'Release'
+  host-framework:
+    description: 'Target framework the host process launches under.'
+    required: true
+  exporters:
+    description: 'Space-separated BenchmarkDotNet exporters.'
+    required: false
+    default: 'github json html csv'
+  build-output-path:
+    description: 'Output root for the measured build. Empty = a drive-root path on Windows, and nothing elsewhere.'
+    required: false
+    default: ''
+  raise-priority:
+    description: 'true raises the priority of the measured processes.'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Run benchmarks
+      shell: bash
+      env:
+        PROJECTS: ${{ inputs.projects }}
+        SRC_FOLDER: ${{ inputs.src-folder }}
+        FILTER: ${{ inputs.filter }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        HOST_FRAMEWORK: ${{ inputs.host-framework }}
+        EXPORTERS: ${{ inputs.exporters }}
+        BUILD_OUTPUT_PATH: ${{ inputs.build-output-path }}
+        RAISE_PRIORITY: ${{ inputs.raise-priority }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/benchmark-run.cs" -- "$PROJECTS" "$SRC_FOLDER" "$FILTER" "$CONFIGURATION" "$HOST_FRAMEWORK" "$EXPORTERS" "$BUILD_OUTPUT_PATH" "$RAISE_PRIORITY"

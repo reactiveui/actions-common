@@ -134,178 +134,27 @@ jobs:
           solution-file: ${{ inputs.solutionFile }}
 
       - name: Run benchmarks
-        shell: bash
-        env:
-          PROJECTS: ${{ inputs.projects }}
-          SRC_FOLDER: ${{ inputs.srcFolder }}
-          FILTER: ${{ inputs.filter }}
-          CONFIGURATION: ${{ inputs.configuration }}
-          HOST_FRAMEWORK: ${{ inputs.hostFramework }}
-          EXPORTERS: ${{ inputs.exporters }}
-          BUILD_OUTPUT_PATH: ${{ inputs.buildOutputPath }}
-          RAISE_PRIORITY: ${{ inputs.raisePriority }}
-        run: |
-          cd "$RUNNER_TEMP" && dotnet run - -- "$PROJECTS" "$SRC_FOLDER" "$FILTER" "$CONFIGURATION" "$HOST_FRAMEWORK" "$EXPORTERS" "$BUILD_OUTPUT_PATH" "$RAISE_PRIORITY" <<'CS'
-          using System.Diagnostics;
-          using static System.Environment;
-
-          if (args is not [var projects, var srcFolder, var filter, var configuration, var hostFramework, var exporters, var buildOutputPath, var raisePriority])
-          {
-              Console.WriteLine("::error::Expected the eight benchmark run arguments.");
-              return 2;
-          }
-
-          var workspace = GetEnvironmentVariable("GITHUB_WORKSPACE")!;
-
-          // An empty build output path picks a drive root on Windows, where the NativeAOT build otherwise passes 260 characters.
-          string[] artifactsPath = (buildOutputPath, OperatingSystem.IsWindows()) switch
-          {
-              (not "", _) => ["--artifacts-path", buildOutputPath],
-              (_, true) => ["--artifacts-path", @"C:\a"],
-              _ => [],
-          };
-
-          if (raisePriority is "true")
-          {
-              RaisePriority();
-          }
-
-          Directory.SetCurrentDirectory(Path.Combine(workspace, srcFolder));
-
-          foreach (var project in projects.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-          {
-              var name = Path.GetFileNameWithoutExtension(project);
-              Console.WriteLine($"::group::{name}");
-
-              var status = Process.Run(
-                  "dotnet",
-                  [
-                      "run", "--project", project, "-c", configuration, "-f", hostFramework, .. artifactsPath, "--",
-                      "--filter", filter, "--artifacts", Path.Combine(workspace, "benchmark-artifacts", name),
-                      "--exporters", .. exporters.Split(' ', StringSplitOptions.RemoveEmptyEntries),
-                  ]);
-
-              Console.WriteLine("::endgroup::");
-              if (status is { ExitCode: not 0 })
-              {
-                  Console.WriteLine($"::error::{name} exited with {status.ExitCode}");
-                  return status.ExitCode;
-              }
-          }
-
-          return 0;
-
-          // Processes started from here inherit the priority on Unix; on Windows BenchmarkDotNet raises its own benchmark processes.
-          static void RaisePriority()
-          {
-              try
-              {
-                  using var current = Process.GetCurrentProcess();
-                  current.PriorityClass = ProcessPriorityClass.High;
-              }
-              catch (Exception ex)
-              {
-                  Console.WriteLine($"::warning::Could not raise the benchmark priority: {ex.Message}");
-              }
-          }
-          CS
+        uses: reactiveui/actions-common/.github/actions/benchmark-run@main
+        with:
+          projects: ${{ inputs.projects }}
+          src-folder: ${{ inputs.srcFolder }}
+          filter: ${{ inputs.filter }}
+          configuration: ${{ inputs.configuration }}
+          host-framework: ${{ inputs.hostFramework }}
+          exporters: ${{ inputs.exporters }}
+          build-output-path: ${{ inputs.buildOutputPath }}
+          raise-priority: ${{ inputs.raisePriority }}
 
       - name: Validate benchmark reports
-        shell: bash
-        run: |
-          cd "$RUNNER_TEMP" && dotnet run - <<'CS'
-          using static System.Environment;
-
-          var root = Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "benchmark-artifacts");
-
-          // BenchmarkDotNet exits zero on a validation error, so the exported reports are the evidence it ran.
-          string[] reports = Directory.Exists(root) ? Directory.GetFiles(root, "*-report-github.md", SearchOption.AllDirectories) : [];
-          if (reports is [])
-          {
-              Console.WriteLine("::error::No benchmark reports were produced. Check the validation errors above.");
-              return 1;
-          }
-
-          // A job whose build fails still exports its rows, with every measurement as NA.
-          var unmeasured = reports
-              .Select(report => (Name: Path.GetFileName(report).Replace("-report-github.md", string.Empty), Rows: File.ReadLines(report).Count(line => line.StartsWith('|') && line.Split('|').Any(cell => cell.Trim() == "NA"))))
-              .Where(report => report.Rows > 0)
-              .Select(report => $"{report.Name} ({report.Rows} rows)")
-              .ToArray();
-
-          if (unmeasured is not [])
-          {
-              Console.WriteLine($"::error::These benchmarks measured nothing: {string.Join("; ", unmeasured)}");
-              return 1;
-          }
-
-          return 0;
-          CS
+        uses: reactiveui/actions-common/.github/actions/benchmark-validate@main
 
       - name: Publish results to run summary
         if: always()
-        shell: bash
-        env:
-          FILTER: ${{ inputs.filter }}
-          BUDGET_KB: ${{ inputs.summaryBudgetKb }}
-          ARTIFACT_NAME: ${{ inputs.artifactName }}
-        run: |
-          cd "$RUNNER_TEMP" && dotnet run - -- "$FILTER" "$BUDGET_KB" "$ARTIFACT_NAME" <<'CS'
-          using static System.Environment;
-
-          if (args is not [var filter, var budgetKb, var artifactName])
-          {
-              Console.WriteLine("::error::Expected the filter, summary budget and artifact name arguments.");
-              return;
-          }
-
-          var budget = long.Parse(budgetKb) * 1024;
-
-          var summary = GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!;
-          var root = Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "benchmark-artifacts");
-
-          // With a revision input the triggering commit is not the measured one, so the checked-out commit MinVer read comes first.
-          var commit = GetEnvironmentVariable("MINVER_GitCommitId") ?? GetEnvironmentVariable("GITHUB_SHA");
-
-          File.AppendAllLines(
-              summary,
-              [
-                  "# Benchmark results",
-                  "",
-                  $"Filter `{filter}`, commit `{commit}`, measured on `{GetEnvironmentVariable("RUNNER_OS")}`.",
-                  "",
-                  "Each section is one benchmark class. The runtimes measured are whichever jobs that class",
-                  "declares, so a class with no NativeAOT row cannot run ahead-of-time at all. A hosted runner",
-                  "is shared, so read these for trend and regression rather than as absolute figures.",
-                  $"Full JSON, HTML and CSV exports are attached to this run as `{artifactName}`.",
-                  "",
-              ]);
-
-          string[] reports = Directory.Exists(root) ? [.. Directory.GetFiles(root, "*-report-github.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal)] : [];
-          if (reports is [])
-          {
-              File.AppendAllLines(summary, ["No benchmark reports were exported."]);
-              return;
-          }
-
-          List<string> skipped = [];
-          foreach (var report in reports)
-          {
-              var title = Path.GetFileName(report).Replace("-report-github.md", string.Empty);
-              if (new FileInfo(summary).Length + new FileInfo(report).Length > budget)
-              {
-                  skipped.Add(title);
-                  continue;
-              }
-
-              File.AppendAllLines(summary, [$"<details><summary>{title}</summary>", "", .. File.ReadLines(report), "", "</details>", ""]);
-          }
-
-          if (skipped is not [])
-          {
-              File.AppendAllLines(summary, ["", $"Omitted here to stay inside the summary limit: {string.Join(", ", skipped)}. Read them in the {artifactName} artifact.", ""]);
-          }
-          CS
+        uses: reactiveui/actions-common/.github/actions/benchmark-summary@main
+        with:
+          filter: ${{ inputs.filter }}
+          budget-kb: ${{ inputs.summaryBudgetKb }}
+          artifact-name: ${{ inputs.artifactName }}
 
       - name: Upload benchmark reports
         if: always()

@@ -1,0 +1,10 @@
+name: GitHub Packages push
+description: Push every .nupkg in the workspace root to the owner's GitHub Packages feed. Reads the token from GITHUB_TOKEN in env.
+
+runs:
+  using: composite
+  steps:
+    - name: Push to GitHub Packages
+      shell: bash
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/github-packages-push.cs"

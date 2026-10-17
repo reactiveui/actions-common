@@ -94,16 +94,17 @@ jobs:
       # The hosted runner has KVM, but only root can open /dev/kvm until a udev rule opens it to the runner user.
       - name: Enable KVM
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' >> "$RUNNER_TEMP/99-kvm4all.rules"
+          sudo cp "$RUNNER_TEMP/99-kvm4all.rules" /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
       - name: Install the emulator and system image
         shell: bash
         env:
-          API_LEVEL: ${{ inputs.androidApiLevel }}
+          SYSTEM_IMAGE: system-images;android-${{ inputs.androidApiLevel }};google_apis;x86_64
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools "system-images;android-$API_LEVEL;google_apis;x86_64"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools "$SYSTEM_IMAGE"
 
       - name: Setup .NET Environment
         uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
@@ -119,14 +120,10 @@ jobs:
           PROJECTS: ${{ inputs.projects }}
           CONFIGURATION: ${{ inputs.configuration }}
           FRAMEWORK: ${{ inputs.androidFramework }}
-          API_LEVEL: ${{ inputs.androidApiLevel }}
+          SYSTEM_IMAGE: system-images;android-${{ inputs.androidApiLevel }};google_apis;x86_64
           TEST_TIMEOUT: ${{ inputs.testTimeout }}
-        run: |
-          cd "$RUNNER_TEMP" && dotnet run --file "$GITHUB_WORKSPACE/.device-tests-tooling/scripts/device-tests.cs" -- android \
-            --project "$PROJECTS" --workspace "$GITHUB_WORKSPACE" \
-            --configuration "$CONFIGURATION" --framework "$FRAMEWORK" --timeout "$TEST_TIMEOUT" \
-            --system-image "system-images;android-$API_LEVEL;google_apis;x86_64" \
-            --results "$GITHUB_WORKSPACE/device-test-results/android"
+        working-directory: ${{ runner.temp }}
+        run: dotnet run --file "$GITHUB_WORKSPACE/.device-tests-tooling/scripts/device-tests.cs" -- android --project "$PROJECTS" --workspace "$GITHUB_WORKSPACE" --configuration "$CONFIGURATION" --framework "$FRAMEWORK" --timeout "$TEST_TIMEOUT" --system-image "$SYSTEM_IMAGE" --results "$GITHUB_WORKSPACE/device-test-results/android"
 
       - name: Upload Android results
         if: always()
@@ -175,12 +172,8 @@ jobs:
           FRAMEWORK: ${{ inputs.iosFramework }}
           DEVICE_TYPE: ${{ inputs.iosDeviceType }}
           TEST_TIMEOUT: ${{ inputs.testTimeout }}
-        run: |
-          cd "$RUNNER_TEMP" && dotnet run --file "$GITHUB_WORKSPACE/.device-tests-tooling/scripts/device-tests.cs" -- ios \
-            --project "$PROJECTS" --workspace "$GITHUB_WORKSPACE" \
-            --configuration "$CONFIGURATION" --framework "$FRAMEWORK" --timeout "$TEST_TIMEOUT" \
-            --device-type "$DEVICE_TYPE" \
-            --results "$GITHUB_WORKSPACE/device-test-results/ios"
+        working-directory: ${{ runner.temp }}
+        run: dotnet run --file "$GITHUB_WORKSPACE/.device-tests-tooling/scripts/device-tests.cs" -- ios --project "$PROJECTS" --workspace "$GITHUB_WORKSPACE" --configuration "$CONFIGURATION" --framework "$FRAMEWORK" --timeout "$TEST_TIMEOUT" --device-type "$DEVICE_TYPE" --results "$GITHUB_WORKSPACE/device-test-results/ios"
 
       - name: Upload iOS results
         if: always()

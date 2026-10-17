@@ -1,0 +1,20 @@
+name: Codecov upload
+description: Download Codecov's standalone CLI for the runner OS, check its SHA-256, and upload every Cobertura report under a folder.
+
+inputs:
+  coverage-folder:
+    description: 'Folder to search for *.cobertura.xml reports, relative to the workspace.'
+    required: false
+    default: '.collect'
+
+runs:
+  using: composite
+  steps:
+    - name: Upload to Codecov
+      shell: bash
+      env:
+        COVERAGE_FOLDER: ${{ inputs.coverage-folder }}
+        CODECOV_CLI_URL: https://cli.codecov.io/latest/${{ runner.os == 'Windows' && 'windows/codecov.exe' || runner.os == 'macOS' && 'macos/codecov' || 'linux/codecov' }}
+        CODECOV_CLI_PATH: ${{ runner.temp }}/${{ runner.os == 'Windows' && 'codecov.exe' || 'codecov' }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/codecov-upload.cs" -- "$COVERAGE_FOLDER" "$CODECOV_CLI_URL" "$CODECOV_CLI_PATH"

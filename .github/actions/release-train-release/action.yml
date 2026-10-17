@@ -1,0 +1,34 @@
+name: Release train release
+description: Start a repository's release workflow, wait for it, and write release.json with the release it made. Reads the GitHub App secrets from APP_CLIENT_ID and APP_PRIVATE_KEY in env.
+
+inputs:
+  entry:
+    description: 'JSON entry of the repository, from the plan.'
+    required: true
+  timeout-minutes:
+    description: 'Minutes the release run may take.'
+    required: true
+  work-folder:
+    description: 'Folder for release.json.'
+    required: true
+
+outputs:
+  reused:
+    description: 'true when the head of the branch was already released and the train reused that release.'
+    value: ${{ steps.release.outputs.reused }}
+  run-url:
+    description: 'URL of the release workflow run.'
+    value: ${{ steps.release.outputs.run-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Release
+      id: release
+      shell: bash
+      env:
+        ENTRY: ${{ inputs.entry }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        WORK_FOLDER: ${{ inputs.work-folder }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-release.cs" -- "$ENTRY" "$TIMEOUT_MINUTES" "$WORK_FOLDER"

@@ -1,14 +1,5 @@
 name: SonarCloud
-description: |
-  Wrap a .NET build/test run with SonarCloud analysis. Call once with mode=begin
-  before the build, then again with mode=end after the test step. Designed to be
-  inserted into the Linux build job so the same machine begins and ends the scan.
-
-  The SonarCloud token is read from the SONAR_TOKEN environment variable — set it
-  at the calling job/step level by mapping the SONAR_TOKEN secret into env on the
-  caller (standard GitHub Actions expression syntax referencing secrets.SONAR_TOKEN)
-  so the value flows through the GitHub Actions secret-masking pipeline. (Composite
-  actions cannot declare secret-typed inputs; only reusable workflows can.)
+description: Wrap a .NET build and test run with SonarCloud analysis (mode begin, then end); reads the token from the SONAR_TOKEN env the caller maps.
 
 inputs:
   mode:
@@ -63,18 +54,8 @@ runs:
   steps:
     - name: Validate SONAR_TOKEN is in scope
       shell: bash
-      run: |
-        cd "$RUNNER_TEMP" && dotnet run - <<'CS'
-        using static System.Environment;
-
-        if (GetEnvironmentVariable("SONAR_TOKEN") is not { Length: > 0 })
-        {
-            Console.WriteLine("::error::SONAR_TOKEN is not set in the job/step env. Map the SONAR_TOKEN secret into env on the calling job/step (see this action's description).");
-            return 1;
-        }
-
-        return 0;
-        CS
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/sonarcloud.cs" -- validate
 
     - name: Set up JDK 25 (SonarScanner prerequisite)
       # skipJreProvisioning runs the scanner on this JDK instead of downloading a JRE.
@@ -108,43 +89,8 @@ runs:
         COVERAGE_EXCLUSIONS: ${{ inputs.coverage-exclusions }}
         CPD_EXCLUSIONS: ${{ inputs.cpd-exclusions }}
         TEST_EXCLUSIONS: ${{ inputs.test-exclusions }}
-      run: |
-        cd "$RUNNER_TEMP" && dotnet run - -- "$WORKING_DIRECTORY" "$PROJECT_KEY" "$ORGANIZATION" "$HOST_URL" "$VERSION" "$COVERAGE_GLOB" "$EXTRA_BEGIN_ARGS" "$EXCLUSIONS" "$COVERAGE_EXCLUSIONS" "$CPD_EXCLUSIONS" "$TEST_EXCLUSIONS" <<'CS'
-        using System.Diagnostics;
-        using static System.Environment;
-
-        if (args is not [var workingDirectory, var projectKey, var organization, var hostUrl, var version, var coverageGlob, var extraBeginArgs, var exclusions, var coverageExclusions, var cpdExclusions, var testExclusions])
-        {
-            Console.WriteLine("::error::Expected the eleven SonarScanner begin arguments.");
-            return 2;
-        }
-
-        Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, workingDirectory));
-
-        return Process.Run(
-            "dotnet",
-            [
-                "sonarscanner", "begin",
-                $"/k:{projectKey}",
-                .. Switch("/o:", organization),
-                $"/d:sonar.host.url={hostUrl}",
-                $"/d:sonar.token={GetEnvironmentVariable("SONAR_TOKEN")}",
-                "/d:sonar.scanner.skipJreProvisioning=true",
-                $"/d:sonar.cs.cobertura.reportsPaths={coverageGlob}",
-                "/d:sonar.issue.ignore.multicriteria=s8969",
-                "/d:sonar.issue.ignore.multicriteria.s8969.ruleKey=csharpsquid:S8969",
-                "/d:sonar.issue.ignore.multicriteria.s8969.resourceKey=**/*.cs",
-                .. Switch("/d:sonar.exclusions=", exclusions),
-                .. Switch("/d:sonar.coverage.exclusions=", coverageExclusions),
-                .. Switch("/d:sonar.cpd.exclusions=", cpdExclusions),
-                .. Switch("/d:sonar.test.exclusions=", testExclusions),
-                .. Switch("/v:", version),
-                .. extraBeginArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries),
-            ]).ExitCode;
-
-        // An empty value leaves its switch out.
-        static string[] Switch(string name, string value) => value is "" ? [] : [name + value];
-        CS
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/sonarcloud.cs" -- begin "$WORKING_DIRECTORY" "$PROJECT_KEY" "$ORGANIZATION" "$HOST_URL" "$VERSION" "$COVERAGE_GLOB" "$EXTRA_BEGIN_ARGS" "$EXCLUSIONS" "$COVERAGE_EXCLUSIONS" "$CPD_EXCLUSIONS" "$TEST_EXCLUSIONS"
 
     - name: SonarScanner end
       if: inputs.mode == 'end'

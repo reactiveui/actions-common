@@ -1,0 +1,45 @@
+name: Release tag resolve
+description: Resolve the built commit SHA and the release tag from a bump result or a version override.
+
+inputs:
+  bump-tag:
+    description: 'Tag computed by compute-version-and-tag, or empty.'
+    required: false
+    default: ''
+  bump-prerelease:
+    description: 'Pre-release flag computed by compute-version-and-tag, or empty.'
+    required: false
+    default: ''
+  version-override:
+    description: 'Exact version to release, or empty. Its tag must not exist yet.'
+    required: false
+    default: ''
+  tag-prefix:
+    description: 'Tag prefix placed before the version override.'
+    required: false
+    default: 'v'
+
+outputs:
+  sha:
+    description: 'Commit SHA of the checked-out HEAD.'
+    value: ${{ steps.resolve.outputs.sha }}
+  tag:
+    description: 'Release tag, or empty for a CI build.'
+    value: ${{ steps.resolve.outputs.tag }}
+  prerelease:
+    description: 'true when the release is a pre-release.'
+    value: ${{ steps.resolve.outputs.prerelease }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve release tag
+      id: resolve
+      shell: bash
+      env:
+        BUMP_TAG: ${{ inputs.bump-tag }}
+        BUMP_PRERELEASE: ${{ inputs.bump-prerelease }}
+        VERSION_OVERRIDE: ${{ inputs.version-override }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-tag-resolve.cs" -- "$BUMP_TAG" "$BUMP_PRERELEASE" "$VERSION_OVERRIDE" "$TAG_PREFIX"

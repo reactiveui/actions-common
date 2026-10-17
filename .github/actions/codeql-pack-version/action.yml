@@ -1,0 +1,17 @@
+name: CodeQL pack version
+description: Set a CodeQL pack's patch version to the number of commits that touched the pack.
+
+inputs:
+  pack-dir:
+    description: 'Pack folder holding qlpack.yml, relative to the workspace.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Stamp pack version
+      shell: bash
+      env:
+        PACK_DIR: ${{ inputs.pack-dir }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/codeql-pack-version.cs" -- "$PACK_DIR"

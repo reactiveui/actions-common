@@ -1,0 +1,27 @@
+name: AOT smoke run
+description: Run a published native AOT smoke-test executable and fail when it exits non-zero.
+
+inputs:
+  project-file:
+    description: 'Smoke-test project file; its name is the executable name when executable-name is empty.'
+    required: true
+  executable-name:
+    description: 'Base name of the native executable, without extension. Empty = the project file name.'
+    required: false
+    default: ''
+  publish-folder:
+    description: 'Folder, relative to the workspace, that holds the published executable.'
+    required: false
+    default: 'aot-publish'
+
+runs:
+  using: composite
+  steps:
+    - name: Run native AOT smoke test
+      shell: bash
+      env:
+        PROJECT_FILE: ${{ inputs.project-file }}
+        EXECUTABLE_NAME: ${{ inputs.executable-name }}
+        PUBLISH_FOLDER: ${{ inputs.publish-folder }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/aot-smoke-run.cs" -- "$PROJECT_FILE" "$EXECUTABLE_NAME" "$PUBLISH_FOLDER"

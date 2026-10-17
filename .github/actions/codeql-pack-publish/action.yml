@@ -1,0 +1,17 @@
+name: CodeQL pack publish
+description: Publish a CodeQL pack with gh codeql, treating an already-published version as success.
+
+inputs:
+  pack-dir:
+    description: 'Pack folder holding qlpack.yml, relative to the workspace.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Publish pack
+      shell: bash
+      env:
+        PACK_DIR: ${{ inputs.pack-dir }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/codeql-pack-publish.cs" -- "$PACK_DIR"

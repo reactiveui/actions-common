@@ -1,0 +1,89 @@
+name: Release train plan
+description: Plan the release order from the release train config. Reads the GitHub App secrets from APP_CLIENT_ID and APP_PRIVATE_KEY in env.
+
+inputs:
+  config:
+    description: 'Release train config, relative to the workspace.'
+    required: false
+    default: 'build/release-train.json'
+  targets:
+    description: 'Repositories or groups to release, separated by commas. all selects every repository.'
+    required: true
+  include-downstream:
+    description: 'true to also release every repository that depends on the targets.'
+    required: true
+  exclude:
+    description: 'Repositories or groups to leave out, separated by commas.'
+    required: false
+    default: ''
+  bump:
+    description: 'Release level for every repository (patch, minor or major).'
+    required: true
+  channel:
+    description: 'Release channel (none, alpha, beta or rc).'
+    required: true
+  on-failure:
+    description: 'stop or continue after a failure.'
+    required: true
+  dry-run:
+    description: 'true to show the plan without checking the GitHub App installations.'
+    required: true
+
+outputs:
+  depth:
+    description: 'Number of levels in the plan.'
+    value: ${{ steps.plan.outputs.depth }}
+  settings:
+    description: 'JSON settings every level reads.'
+    value: ${{ steps.plan.outputs.settings }}
+  plan:
+    description: 'JSON list of the planned repositories and their levels.'
+    value: ${{ steps.plan.outputs.plan }}
+  level0:
+    description: 'JSON list of the repositories in level 0.'
+    value: ${{ steps.plan.outputs.level0 }}
+  level1:
+    description: 'JSON list of the repositories in level 1.'
+    value: ${{ steps.plan.outputs.level1 }}
+  level2:
+    description: 'JSON list of the repositories in level 2.'
+    value: ${{ steps.plan.outputs.level2 }}
+  level3:
+    description: 'JSON list of the repositories in level 3.'
+    value: ${{ steps.plan.outputs.level3 }}
+  level4:
+    description: 'JSON list of the repositories in level 4.'
+    value: ${{ steps.plan.outputs.level4 }}
+  level5:
+    description: 'JSON list of the repositories in level 5.'
+    value: ${{ steps.plan.outputs.level5 }}
+  level6:
+    description: 'JSON list of the repositories in level 6.'
+    value: ${{ steps.plan.outputs.level6 }}
+  level7:
+    description: 'JSON list of the repositories in level 7.'
+    value: ${{ steps.plan.outputs.level7 }}
+  level8:
+    description: 'JSON list of the repositories in level 8.'
+    value: ${{ steps.plan.outputs.level8 }}
+  level9:
+    description: 'JSON list of the repositories in level 9.'
+    value: ${{ steps.plan.outputs.level9 }}
+
+runs:
+  using: composite
+  steps:
+    - name: Plan release order
+      id: plan
+      shell: bash
+      env:
+        CONFIG: ${{ inputs.config }}
+        TARGETS: ${{ inputs.targets }}
+        INCLUDE_DOWNSTREAM: ${{ inputs.include-downstream }}
+        EXCLUDE: ${{ inputs.exclude }}
+        BUMP: ${{ inputs.bump }}
+        CHANNEL: ${{ inputs.channel }}
+        ON_FAILURE: ${{ inputs.on-failure }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-plan.cs" -- "$CONFIG" "$TARGETS" "$INCLUDE_DOWNSTREAM" "$EXCLUDE" "$BUMP" "$CHANNEL" "$ON_FAILURE" "$DRY_RUN"

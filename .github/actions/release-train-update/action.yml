@@ -1,0 +1,44 @@
+name: Release train update
+description: Move a repository's package versions to the train's releases through a pull request, then merge it once its checks pass. Reads the GitHub App secrets from APP_CLIENT_ID and APP_PRIVATE_KEY in env.
+
+inputs:
+  entry:
+    description: 'JSON entry of the repository, from the plan.'
+    required: true
+  settings:
+    description: 'JSON settings from the plan.'
+    required: true
+  results-folder:
+    description: 'Folder holding the earlier levels'' result files. It need not exist.'
+    required: true
+  work-folder:
+    description: 'Folder for the clone, updates.json and the pull request body.'
+    required: true
+
+outputs:
+  blocked:
+    description: 'true when a repository this one waits for did not release in this run.'
+    value: ${{ steps.update.outputs.blocked }}
+  reason:
+    description: 'Why the repository is blocked.'
+    value: ${{ steps.update.outputs.reason }}
+  changed:
+    description: 'true when a pull request was opened or updated.'
+    value: ${{ steps.update.outputs.changed }}
+  pull-request:
+    description: 'URL of the dependency pull request.'
+    value: ${{ steps.update.outputs.pull-request }}
+
+runs:
+  using: composite
+  steps:
+    - name: Update dependencies
+      id: update
+      shell: bash
+      env:
+        ENTRY: ${{ inputs.entry }}
+        SETTINGS: ${{ inputs.settings }}
+        RESULTS_FOLDER: ${{ inputs.results-folder }}
+        WORK_FOLDER: ${{ inputs.work-folder }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-update.cs" -- "$ENTRY" "$SETTINGS" "$RESULTS_FOLDER" "$WORK_FOLDER"

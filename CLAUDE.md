@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What This Repository Is
 
 This repository holds the GitHub Actions every ReactiveUI repository shares: reusable workflows, composite
-actions, the Certum signer container image and a CodeQL model pack. README.md describes each one.
+actions and a CodeQL model pack. README.md describes each one.
 
 **CRITICAL:** Every repository calls this one at `@main`. A change pushed to `main` reaches every repository on
 its next run.
@@ -24,43 +24,52 @@ failing log before proposing a cause.
 
 - `actionlint .github/workflows/*.yml` lints the workflows. It does not read the composite actions in
   `.github/actions/`.
-- To compile an inline script, copy the text between `<<'CS'` and `CS` into a `.cs` file **outside the
-  repository** and run `dotnet build file.cs`.
-- `publish-certum-signer.yml` and `publish-codeql-model-pack.yml` run on a push to `main` that changes their
-  files. Watch them with `gh run list` and read failures with `gh run view <id> --log-failed`.
-- Let `publish-certum-signer.yml` build the signer image. Do not build it locally.
+- To compile a script, copy its `.cs` file **outside the repository** and run `dotnet build file.cs`. The
+  repository's `global.json` and analyzers would otherwise apply.
+- `publish-codeql-model-pack.yml` runs on a push to `main` that changes its files. Watch it with `gh run list` and
+  read failures with `gh run view <id> --log-failed`.
 - The other workflows only run from a calling repository. Check a change there.
 
-## Inline C# Scripts
+## C# Scripts
 
-Any step with logic beyond a single command runs C#. Single commands such as `dotnet restore`, `gh codeql pack
-publish` or `apt-get install` stay as plain `run:` lines. Do not write logic in bash, PowerShell or Python.
+Bash is fine for a sequence of plain commands such as `dotnet restore` or `apt-get install`. A step with
+branching, loops or parsing runs C#. Do not write that logic in bash, PowerShell or Python.
+
+Each script lives in a `.cs` file next to the `action.yml` that runs it. A workflow never holds a script. When a
+workflow needs logic, put it in a composite action here and call it with
+`uses: reactiveui/actions-common/.github/actions/NAME@main`.
 
 ### The Shape Every Script Follows
+
+`action.yml`:
 
 ```yaml
 - name: Stamp pack version
   shell: bash
   env:
-    PACK_DIR: ${{ inputs.packDir }}
-  run: |
-    cd "$RUNNER_TEMP" && dotnet run - -- "$PACK_DIR" <<'CS'
-    using System.Diagnostics;
-    using static System.Environment;
+    PACK_DIR: ${{ inputs.pack-dir }}
+  working-directory: ${{ runner.temp }}
+  run: dotnet run --file "$GITHUB_ACTION_PATH/codeql-pack-version.cs" -- "$PACK_DIR"
+```
 
-    if (args is not [var packDir])
-    {
-        Console.WriteLine("::error::Expected the pack directory argument.");
-        return 2;
-    }
+`codeql-pack-version.cs`:
 
-    Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+```csharp
+using System.Diagnostics;
+using static System.Environment;
 
-    // ...
+if (args is not [var packDir])
+{
+    Console.WriteLine("::error::Expected the pack directory argument.");
+    return 2;
+}
 
-    File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!, [$"version={version}"]);
-    return 0;
-    CS
+Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
+
+// ...
+
+File.AppendAllLines(GetEnvironmentVariable("GITHUB_OUTPUT")!, [$"version={version}"]);
+return 0;
 ```
 
 - **Inputs go through `env:`, then arguments.** Never put `${{ }}` inside the script text. A value from a pull
@@ -136,21 +145,16 @@ Use the newest C# the .NET 11 SDK accepts:
 - `shell: bash` on Windows is Git Bash. It rewrites arguments that look like paths, so `/d:sonar.x=y` loses its
   slash. A step that passes such arguments sets `MSYS2_ARG_CONV_EXCL: '*'`.
 
-## The Signer Image
+## Package Signing
 
-- **Base images are pinned by digest.** Renovate updates both `FROM` lines together. Do not put the reference back
-  into an `ARG`.
-- **Stay on libxml2 2.13.x and libxslt 1.1.43.** libxml2 2.14
-  [renames the library](https://discourse.gnome.org/t/libxml2-2-14-0-released/28025) to `libxml2.so.16`, which
-  SimplySign's bundled WebKit cannot load. libxslt 1.1.44 and later require libxml2 2.15.
-- **Never write `SimplySignDesktop` in the `RUN` step that runs the installer.** The installer stops every process
-  whose command line contains that name, including the build step. Use `$SS_DIST`.
-- **Do not add `libqt5*` packages.** SimplySign bundles its own Qt 5.9.
-- **Keep the library check.** It runs `ldd` on SimplySign and its X platform plugin, and it is the only proof that
-  the image can start SimplySign.
-- **Ubuntu 26.04 is the base on purpose.** .NET 11 images ship for Ubuntu 26.04, Azure Linux and Alpine only, per
-  dotnet-docker's [platform policy](https://github.com/dotnet/dotnet-docker/blob/main/documentation/supported-platforms.md). Azure
-  Linux 3.0 has no `xdotool`, window manager or Java runtime. Alpine uses musl, and SimplySign is a glibc build.
+- **`certum-sign` installs the SafeSign .NET tool** and signs `.nupkg` files through the SimplySign cloud service. It
+  runs on a standard `ubuntu-latest` runner. There is no signer image.
+- **The tool version is the `safesign-version` input.** Its `# renovate:` comment keeps it current. Do not remove
+  the comment.
+- **The sign job runs `dotnet-environment` first.** The tool needs the .NET 10 or 11 runtime.
+- **SafeSign reads the credentials from the environment.** The names are `CERTUM_USER_ID`, `CERTUM_OTP_URI` and
+  `CERTUM_CERT_FINGERPRINT`. Do not pass them as arguments.
+- **Only NuGet packages are signed.** Add other formats when a repository needs them.
 
 ## The CodeQL Pack
 

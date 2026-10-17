@@ -1,0 +1,21 @@
+name: Release train NuGet wait
+description: Wait until NuGet lists every package in a release train release.json.
+
+inputs:
+  release-file:
+    description: 'release.json written by release-train-release.'
+    required: true
+  timeout-minutes:
+    description: 'Minutes NuGet may take to list the packages.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Wait for NuGet
+      shell: bash
+      env:
+        RELEASE_FILE: ${{ inputs.release-file }}
+        TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-nuget-wait.cs" -- "$RELEASE_FILE" "$TIMEOUT_MINUTES"

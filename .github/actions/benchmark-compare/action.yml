@@ -1,0 +1,21 @@
+name: Benchmark compare
+description: Compare two BenchmarkDotNet result folders by their 99.9% confidence intervals and write the table to the run summary.
+
+inputs:
+  base-folder:
+    description: 'Folder holding the baseline *full.json reports.'
+    required: true
+  head-folder:
+    description: 'Folder holding the head *full.json reports.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Compare base and head
+      shell: bash
+      env:
+        BASE_FOLDER: ${{ inputs.base-folder }}
+        HEAD_FOLDER: ${{ inputs.head-folder }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/benchmark-compare.cs" -- "$BASE_FOLDER" "$HEAD_FOLDER"

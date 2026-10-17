@@ -1,0 +1,69 @@
+name: Release train record
+description: Write one repository's release train result file and its job summary.
+
+inputs:
+  name:
+    description: 'Repository name in the release train config.'
+    required: true
+  repository:
+    description: 'Repository, as owner/name.'
+    required: true
+  blocked:
+    description: 'blocked output of release-train-update.'
+    required: false
+    default: ''
+  reason:
+    description: 'reason output of release-train-update.'
+    required: false
+    default: ''
+  update-outcome:
+    description: 'Outcome of the update step.'
+    required: false
+    default: ''
+  release-outcome:
+    description: 'Outcome of the release step.'
+    required: false
+    default: ''
+  nuget-outcome:
+    description: 'Outcome of the NuGet wait step.'
+    required: false
+    default: ''
+  pull-request:
+    description: 'pull-request output of release-train-update.'
+    required: false
+    default: ''
+  run-url:
+    description: 'run-url output of release-train-release.'
+    required: false
+    default: ''
+  reused:
+    description: 'reused output of release-train-release.'
+    required: false
+    default: ''
+  work-folder:
+    description: 'Folder holding release.json and updates.json.'
+    required: true
+  result-folder:
+    description: 'Folder to write <name>.json to.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Record result
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        REPOSITORY: ${{ inputs.repository }}
+        BLOCKED: ${{ inputs.blocked }}
+        REASON: ${{ inputs.reason }}
+        UPDATE_OUTCOME: ${{ inputs.update-outcome }}
+        RELEASE_OUTCOME: ${{ inputs.release-outcome }}
+        NUGET_OUTCOME: ${{ inputs.nuget-outcome }}
+        PULL_REQUEST: ${{ inputs.pull-request }}
+        RUN_URL: ${{ inputs.run-url }}
+        REUSED: ${{ inputs.reused }}
+        WORK_FOLDER: ${{ inputs.work-folder }}
+        RESULT_FOLDER: ${{ inputs.result-folder }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-record.cs" -- "$NAME" "$REPOSITORY" "$BLOCKED" "$REASON" "$UPDATE_OUTCOME" "$RELEASE_OUTCOME" "$NUGET_OUTCOME" "$PULL_REQUEST" "$RUN_URL" "$REUSED" "$WORK_FOLDER" "$RESULT_FOLDER"

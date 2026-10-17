@@ -1,0 +1,39 @@
+name: GitHub release create
+description: Create a GitHub release and its tag from release-notes.md, attaching matching files from the signed folder.
+
+inputs:
+  repository:
+    description: 'Repository (owner/name) to create the release in.'
+    required: true
+  tag:
+    description: 'Tag to create and attach the release to.'
+    required: true
+  target:
+    description: 'Commit SHA or branch the tag points at.'
+    required: true
+  title:
+    description: 'Release title.'
+    required: true
+  prerelease:
+    description: 'true to mark the release as a pre-release.'
+    required: false
+    default: 'false'
+  asset-glob:
+    description: 'File name pattern, within the signed folder, of the files to attach.'
+    required: false
+    default: '*.nupkg'
+
+runs:
+  using: composite
+  steps:
+    - name: Create GitHub Release
+      shell: bash
+      env:
+        REPO: ${{ inputs.repository }}
+        TAG: ${{ inputs.tag }}
+        TARGET: ${{ inputs.target }}
+        TITLE: ${{ inputs.title }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        ASSET_GLOB: ${{ inputs.asset-glob }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/github-release-create.cs" -- "$REPO" "$TAG" "$TARGET" "$TITLE" "$PRERELEASE" "$ASSET_GLOB"

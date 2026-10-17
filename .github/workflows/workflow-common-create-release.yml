@@ -19,7 +19,12 @@ on:
       artifactName:
         type: string
         default: 'signed-nuget'
-        description: 'Name of the artifact containing .nupkg files to attach to the release'
+        description: 'Name of the artifact containing the files to attach to the release'
+
+      assetGlob:
+        type: string
+        default: '*.nupkg'
+        description: 'File name pattern, within the artifact, of the files to attach to the release'
 
       target:
         type: string
@@ -58,29 +63,13 @@ jobs:
 
       # Also creates the tag, pinned by --target to the commit the release job built.
       - name: Create GitHub Release
-        shell: bash
+        uses: reactiveui/actions-common/.github/actions/github-release-create@main
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag != '' && inputs.tag || inputs.version }}
-          TARGET: ${{ inputs.target != '' && inputs.target || github.sha }}
-          TITLE: ${{ inputs.version }}
-          PRERELEASE: ${{ inputs.prerelease }}
-        run: |
-          cd "$RUNNER_TEMP" && dotnet run - -- "$REPO" "$TAG" "$TARGET" "$TITLE" "$PRERELEASE" <<'CS'
-          using System.Diagnostics;
-          using static System.Environment;
-
-          if (args is not [var repository, var tag, var target, var title, var prerelease])
-          {
-              Console.WriteLine("::error::Expected the repository, tag, target, title and pre-release arguments.");
-              return 2;
-          }
-
-          Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
-
-          string[] flags = prerelease is "true" ? ["--prerelease"] : [];
-          return Process.Run(
-              "gh",
-              ["release", "create", tag, "--repo", repository, "--target", target, "--title", title, "--notes-file", "release-notes.md", .. flags, .. Directory.GetFiles("signed", "*.nupkg")]).ExitCode;
-          CS
+        with:
+          repository: ${{ github.repository }}
+          tag: ${{ inputs.tag != '' && inputs.tag || inputs.version }}
+          target: ${{ inputs.target != '' && inputs.target || github.sha }}
+          title: ${{ inputs.version }}
+          prerelease: ${{ inputs.prerelease }}
+          asset-glob: ${{ inputs.assetGlob }}

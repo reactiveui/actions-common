@@ -23,11 +23,7 @@ inputs:
   dotnet-versions:
     description: 'Newline-separated list of .NET SDKs to install. It must cover every runtime the benchmark classes declare a job for.'
     required: false
-    default: |
-      8.0.x
-      9.0.x
-      10.0.x
-      11.0.x
+    default: '11.0.x'
 
 runs:
   using: composite
@@ -50,52 +46,5 @@ runs:
       env:
         PROJECTS: ${{ inputs.projects }}
         RESULTS_FOLDER: ${{ inputs.results-folder }}
-      run: |
-        cd "$RUNNER_TEMP" && dotnet run - -- "$PROJECTS" "$RESULTS_FOLDER" <<'CS'
-        using System.Diagnostics;
-        using static System.Environment;
-
-        if (args is not [var projects, var results])
-        {
-            Console.WriteLine("::error::Expected the projects and results folder arguments.");
-            return 2;
-        }
-
-        // A short build path on Windows keeps the NativeAOT build under 260 characters.
-        var output = OperatingSystem.IsWindows() ? @"C:\a" : Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "a");
-
-        RaisePriority();
-        Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "src"));
-
-        foreach (var project in projects.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            var name = Path.GetFileNameWithoutExtension(project);
-            var status = Process.Run(
-                "dotnet",
-                [
-                    "run", "--project", project, "-c", "Release", "-f", "net10.0", "--artifacts-path", output, "--",
-                    "--filter", "*", "--artifacts", Path.Combine(results, name), "--exporters", "github", "fulljson",
-                ]);
-
-            if (status is { ExitCode: not 0 })
-            {
-                return status.ExitCode;
-            }
-        }
-
-        return 0;
-
-        // Processes started from here inherit the priority on Unix; on Windows BenchmarkDotNet raises its own benchmark processes.
-        static void RaisePriority()
-        {
-            try
-            {
-                using var current = Process.GetCurrentProcess();
-                current.PriorityClass = ProcessPriorityClass.High;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"::warning::Could not raise the benchmark priority: {ex.Message}");
-            }
-        }
-        CS
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/dotnet-benchmarks.cs" -- "$PROJECTS" "$RESULTS_FOLDER"

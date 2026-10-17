@@ -1,0 +1,28 @@
+name: Release inputs validate
+description: Fail when the bump, pre-release and version override release inputs cannot be combined.
+
+inputs:
+  bump:
+    description: 'Release level (major|minor|patch), or empty.'
+    required: false
+    default: ''
+  pre-release:
+    description: 'Pre-release channel identifier, or empty.'
+    required: false
+    default: ''
+  version-override:
+    description: 'Exact version to stamp, or empty.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Validate version inputs
+      shell: bash
+      env:
+        BUMP: ${{ inputs.bump }}
+        PRE_RELEASE: ${{ inputs.pre-release }}
+        VERSION_OVERRIDE: ${{ inputs.version-override }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-inputs-validate.cs" -- "$BUMP" "$PRE_RELEASE" "$VERSION_OVERRIDE"

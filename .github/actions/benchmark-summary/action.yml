@@ -1,0 +1,28 @@
+name: Benchmark summary
+description: Append the benchmark-artifacts GitHub markdown reports to the run summary, stopping before the size budget.
+
+inputs:
+  filter:
+    description: 'BenchmarkDotNet filter the run used, shown in the heading.'
+    required: false
+    default: '*'
+  budget-kb:
+    description: 'How much of the run summary to fill with report tables, in KiB.'
+    required: false
+    default: '900'
+  artifact-name:
+    description: 'Name of the artifact holding the full reports.'
+    required: false
+    default: 'benchmark-reports'
+
+runs:
+  using: composite
+  steps:
+    - name: Publish results to run summary
+      shell: bash
+      env:
+        FILTER: ${{ inputs.filter }}
+        BUDGET_KB: ${{ inputs.budget-kb }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/benchmark-summary.cs" -- "$FILTER" "$BUDGET_KB" "$ARTIFACT_NAME"

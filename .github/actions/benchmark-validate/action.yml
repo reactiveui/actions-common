@@ -1,0 +1,10 @@
+name: Benchmark validate
+description: Fail when benchmark-artifacts holds no GitHub markdown report, or a report has a row measured as NA.
+
+runs:
+  using: composite
+  steps:
+    - name: Validate benchmark reports
+      shell: bash
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/benchmark-validate.cs"

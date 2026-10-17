@@ -1,0 +1,30 @@
+name: Release train summary
+description: Summarise a release train run from its plan and each repository's result file.
+
+inputs:
+  plan:
+    description: 'JSON plan output of release-train-plan.'
+    required: true
+  results-folder:
+    description: 'Folder holding the downloaded train-result JSON files.'
+    required: true
+
+outputs:
+  results:
+    description: 'JSON list with the result of every planned repository.'
+    value: ${{ steps.summary.outputs.results }}
+  remaining:
+    description: 'Comma-separated repositories that were not released.'
+    value: ${{ steps.summary.outputs.remaining }}
+
+runs:
+  using: composite
+  steps:
+    - name: Summarise the train
+      id: summary
+      shell: bash
+      env:
+        PLAN: ${{ inputs.plan }}
+        RESULTS_FOLDER: ${{ inputs.results-folder }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-summary.cs" -- "$PLAN" "$RESULTS_FOLDER"

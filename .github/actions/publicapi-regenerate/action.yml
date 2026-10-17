@@ -1,0 +1,27 @@
+name: PublicAPI regenerate
+description: Regenerate the PublicApiSharp baselines for every project and target framework this host can build.
+
+inputs:
+  src-dir:
+    description: 'Absolute path of the folder holding the projects.'
+    required: true
+  tfm-filter:
+    description: 'Comma-separated target framework substrings to regenerate. Empty = all.'
+    required: false
+    default: ''
+  projects:
+    description: 'Comma-separated exact project names to regenerate. Empty = every project with a PublicAPI folder.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Regenerate baselines
+      shell: bash
+      env:
+        SRC_DIR: ${{ inputs.src-dir }}
+        TFM_FILTER: ${{ inputs.tfm-filter }}
+        PROJECTS: ${{ inputs.projects }}
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/publicapi-regenerate.cs" -- "$SRC_DIR" "$TFM_FILTER" "$PROJECTS"

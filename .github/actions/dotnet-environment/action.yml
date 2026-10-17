@@ -1,8 +1,5 @@
 name: .NET Environment Setup
-description: |
-  Setup .NET SDK, optional workloads, and version stamping with
-  MinVer. Version is computed from the latest reachable v-prefixed tag (or the
-  minver-minimum-major-minor floor when none is reachable).
+description: Set up the .NET SDK, optional workloads and MinVer version stamping from the latest reachable tag.
 
 inputs:
   dotnet-versions:
@@ -60,62 +57,26 @@ runs:
     - name: Setup .NET SDK
       uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
       with:
-        dotnet-version: ${{ inputs.dotnet-versions }}
+        # The action scripts here and in the minver action run on .NET 11, whatever the caller builds with.
+        dotnet-version: |
+          ${{ inputs.dotnet-versions }}
+          11.0.x
 
     - name: Configure .NET CLI environment
       shell: bash
       run: |
-        cd "$RUNNER_TEMP" && dotnet run - <<'CS'
-        using static System.Environment;
-
-        File.AppendAllLines(GetEnvironmentVariable("GITHUB_ENV")!, ["DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1", "DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1"]);
-        CS
+        echo "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1" >> "$GITHUB_ENV"
+        echo "DOTNET_NOLOGO=1" >> "$GITHUB_ENV"
+        echo "DOTNET_CLI_TELEMETRY_OPTOUT=1" >> "$GITHUB_ENV"
 
     - name: Configure Windows Defender exclusions
       if: runner.os == 'Windows'
-      shell: bash
+      shell: pwsh
+      # Real-time scanning of build output is a large share of Windows build time. Best-effort: -ErrorAction Continue
+      # reports a failure and carries on, and the step's exit code ignores it.
       run: |
-        cd "$RUNNER_TEMP" && dotnet run - <<'CS'
-        #:package System.Management@*
-        #:property PublishAot=false
-
-        using System.Management;
-        using System.Runtime.Versioning;
-        using static System.Environment;
-
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        // Real-time scanning of build output is a large share of Windows build time. Best-effort.
-        AddExclusions(
-            "ExclusionPath",
-            [
-                GetEnvironmentVariable("GITHUB_WORKSPACE")!,
-                GetEnvironmentVariable("DOTNET_ROOT")!,
-                GetEnvironmentVariable("RUNNER_TEMP")!,
-                Path.Combine(GetFolderPath(SpecialFolder.UserProfile), ".nuget"),
-            ]);
-        AddExclusions("ExclusionProcess", ["dotnet.exe", "MSBuild.exe", "VBCSCompiler.exe"]);
-
-        [SupportedOSPlatform("windows")]
-        static void AddExclusions(string preference, string[] values)
-        {
-            try
-            {
-                using var preferences = new ManagementClass(@"root\Microsoft\Windows\Defender", "MSFT_MpPreference", null);
-                using var parameters = preferences.GetMethodParameters("Add");
-                parameters[preference] = values;
-                preferences.InvokeMethod("Add", parameters, null);
-                Console.WriteLine($"Defender {preference}: {string.Join(", ", values)}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Skipped Defender {preference} ({ex.Message})");
-            }
-        }
-        CS
+        Add-MpPreference -ErrorAction Continue -ExclusionPath $env:GITHUB_WORKSPACE, $env:DOTNET_ROOT, $env:RUNNER_TEMP, (Join-Path $env:USERPROFILE '.nuget')
+        Add-MpPreference -ErrorAction Continue -ExclusionProcess dotnet.exe, MSBuild.exe, VBCSCompiler.exe
 
     - name: Restore .NET Workloads
       if: inputs.install-workloads == 'true'
@@ -123,39 +84,13 @@ runs:
       env:
         SRC_FOLDER: ${{ inputs.src-folder }}
         SOLUTION_FILE: ${{ inputs.solution-file }}
-      run: |
-        cd "$RUNNER_TEMP" && dotnet run - -- "$SRC_FOLDER" "$SOLUTION_FILE" <<'CS'
-        using System.Diagnostics;
-        using System.Text.Json;
-        using static System.Environment;
-
-        if (args is not [var srcFolder, var solutionFile])
-        {
-            Console.WriteLine("::error::Expected the source folder and solution file arguments.");
-            return 2;
-        }
-
-        Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, srcFolder));
-
-        // dotnet workload restore does not read a solution filter, so a filter restores its base solution's workloads.
-        if (solutionFile.EndsWith(".slnf", StringComparison.OrdinalIgnoreCase))
-        {
-            using JsonDocument filter = JsonDocument.Parse(File.ReadAllText(solutionFile));
-            string basePath = filter.RootElement.GetProperty("solution").GetProperty("path").GetString()!;
-            solutionFile = Path.Combine(Path.GetDirectoryName(solutionFile) ?? string.Empty, basePath);
-        }
-
-        IEnumerable<string> solution = solutionFile is not ""
-            ? [solutionFile]
-            : Directory.EnumerateFiles(".", "*.slnx").Concat(Directory.EnumerateFiles(".", "*.sln")).Take(1);
-
-        return Process.Run("dotnet", ["workload", "restore", .. solution, "--from-previous-sdk", "--skip-manifest-update"]).ExitCode;
-        CS
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/dotnet-environment.cs" -- "$SRC_FOLDER" "$SOLUTION_FILE"
 
     - name: Stamp version with MinVer
       id: minver
       if: inputs.stamp-version == 'true'
-      uses: reactiveui/actions-common/.github/actions/minver@main
+      uses: reactiveui/actions-common/.github/actions/minver@ccd848765a7faee125e5e09b60acb86f34f9adc5 # main
       with:
         tag-prefix: ${{ inputs.minver-tag-prefix }}
         minimum-major-minor: ${{ inputs.minver-minimum-major-minor }}
