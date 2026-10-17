@@ -90,7 +90,7 @@ runs:
     - name: Stamp version with MinVer
       id: minver
       if: inputs.stamp-version == 'true'
-      uses: reactiveui/actions-common/.github/actions/minver@ccd848765a7faee125e5e09b60acb86f34f9adc5 # main
+      uses: reactiveui/actions-common/.github/actions/minver@main
       with:
         tag-prefix: ${{ inputs.minver-tag-prefix }}
         minimum-major-minor: ${{ inputs.minver-minimum-major-minor }}
