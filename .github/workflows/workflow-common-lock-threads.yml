@@ -1,0 +1,20 @@
+name: Lock inactive threads
+
+on:
+  workflow_call:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: reactiveui/actions-common/.github/actions/dotnet-environment@main
+        with:
+          stamp-version: 'false'
+      - uses: reactiveui/actions-common/.github/actions/lock-threads@main
+        env:
+          GH_TOKEN: ${{ github.token }}
