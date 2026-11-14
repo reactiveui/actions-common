@@ -2,6 +2,22 @@ name: Lock inactive threads
 
 on:
   workflow_call:
+    inputs:
+      inactiveDays:
+        type: number
+        default: 14
+      lockReason:
+        type: string
+        default: ''
+      excludeIssueLabel:
+        type: string
+        default: ''
+      addIssueLabel:
+        type: string
+        default: ''
+      postComment:
+        type: boolean
+        default: true
 
 permissions:
   issues: write
@@ -18,3 +34,8 @@ jobs:
       - uses: reactiveui/actions-common/.github/actions/lock-threads@main
         env:
           GH_TOKEN: ${{ github.token }}
+          INACTIVE_DAYS: ${{ inputs.inactiveDays }}
+          LOCK_REASON: ${{ inputs.lockReason }}
+          EXCLUDE_ISSUE_LABEL: ${{ inputs.excludeIssueLabel }}
+          ADD_ISSUE_LABEL: ${{ inputs.addIssueLabel }}
+          POST_COMMENT: ${{ inputs.postComment }}

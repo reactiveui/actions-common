@@ -5,6 +5,7 @@
 #:property TargetFramework=net11.0
 
 using System.Net.Http.Headers;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -19,7 +20,8 @@ client.DefaultRequestHeaders.UserAgent.ParseAdd("reactiveui-actions-common");
 client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
 client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
 
-var cutoff = DateTimeOffset.UtcNow.AddDays(-14);
+var days = int.Parse(GetEnvironmentVariable("INACTIVE_DAYS") ?? "14", CultureInfo.InvariantCulture);
+var cutoff = DateTimeOffset.UtcNow.AddDays(-days);
 var query = Uri.EscapeDataString(FormattableString.Invariant($"repo:{repository} is:closed is:unlocked updated:<{cutoff:yyyy-MM-ddTHH:mm:ssZ}"));
 using var search = await client.GetAsync($"/search/issues?q={query}&sort=updated&order=asc&per_page=50", cancellationToken);
 search.EnsureSuccessStatusCode();
@@ -41,12 +43,33 @@ foreach (var item in results.RootElement.GetProperty("items").EnumerateArray())
         continue;
     }
 
-    var kind = thread.TryGetProperty("pull_request", out _) ? "pull request" : "issue";
+    var isPullRequest = thread.TryGetProperty("pull_request", out _);
+    var excludedLabel = GetEnvironmentVariable("EXCLUDE_ISSUE_LABEL");
+    if (!isPullRequest && !string.IsNullOrEmpty(excludedLabel)
+        && thread.GetProperty("labels").EnumerateArray().Any(label => string.Equals(label.GetProperty("name").GetString(), excludedLabel, StringComparison.OrdinalIgnoreCase)))
+    {
+        continue;
+    }
+
+    var kind = isPullRequest ? "pull request" : "issue";
     var body = $"This {kind} has been automatically locked since there has not been any recent activity after it was closed. Please open a new issue for related bugs.";
-    using var content = new StringContent(new JsonObject { ["body"] = body }.ToJsonString(), Encoding.UTF8, "application/json");
-    using var comment = await client.PostAsync($"{path}/comments", content, cancellationToken);
-    comment.EnsureSuccessStatusCode();
-    using var locked = await client.PutAsync($"{path}/lock", null, cancellationToken);
+    if (GetEnvironmentVariable("POST_COMMENT") != "false")
+    {
+        using var content = new StringContent(new JsonObject { ["body"] = body }.ToJsonString(), Encoding.UTF8, "application/json");
+        using var comment = await client.PostAsync($"{path}/comments", content, cancellationToken);
+        comment.EnsureSuccessStatusCode();
+    }
+
+    if (!isPullRequest && GetEnvironmentVariable("ADD_ISSUE_LABEL") is { Length: > 0 } label)
+    {
+        using var content = new StringContent(new JsonObject { ["labels"] = new JsonArray(label) }.ToJsonString(), Encoding.UTF8, "application/json");
+        using var labeled = await client.PostAsync($"{path}/labels", content, cancellationToken);
+        labeled.EnsureSuccessStatusCode();
+    }
+
+    var reason = GetEnvironmentVariable("LOCK_REASON");
+    using var lockContent = string.IsNullOrEmpty(reason) ? null : new StringContent(new JsonObject { ["lock_reason"] = reason }.ToJsonString(), Encoding.UTF8, "application/json");
+    using var locked = await client.PutAsync($"{path}/lock", lockContent, cancellationToken);
     locked.EnsureSuccessStatusCode();
     Console.WriteLine(FormattableString.Invariant($"Locked {kind} #{number}."));
 }
