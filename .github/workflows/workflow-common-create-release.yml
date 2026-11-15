@@ -16,6 +16,16 @@ on:
         default: ''
         description: 'Git tag to attach the release to (e.g. v2.4.0). Defaults to version when empty (back-compat).'
 
+      tagPrefix:
+        type: string
+        default: ''
+        description: 'Release stream tag prefix used to select the previous stable release for notes. Empty uses the repository latest release.'
+
+      title:
+        type: string
+        default: ''
+        description: 'GitHub release title, including the package family when versions are independent. Empty uses version.'
+
       artifactName:
         type: string
         default: 'signed-nuget'
@@ -59,7 +69,10 @@ jobs:
           DOTNET_ROLL_FORWARD: Major
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
-        run: git-release-notes --release-version "$RELEASE_VERSION" --output-file release-notes.md
+          RELEASE_TAG: ${{ inputs.tag != '' && inputs.tag || inputs.version }}
+          TAG_PREFIX: ${{ inputs.tagPrefix }}
+          HEAD_REF: ${{ inputs.target != '' && inputs.target || github.sha }}
+        run: git-release-notes --release-version "$RELEASE_VERSION" --tag-prefix "$TAG_PREFIX" --release-tag "$RELEASE_TAG" --head-ref "$HEAD_REF" --output-file release-notes.md
 
       # Also creates the tag, pinned by --target to the commit the release job built.
       - name: Create GitHub Release
@@ -70,6 +83,6 @@ jobs:
           repository: ${{ github.repository }}
           tag: ${{ inputs.tag != '' && inputs.tag || inputs.version }}
           target: ${{ inputs.target != '' && inputs.target || github.sha }}
-          title: ${{ inputs.version }}
+          title: ${{ inputs.title != '' && inputs.title || inputs.version }}
           prerelease: ${{ inputs.prerelease }}
           asset-glob: ${{ inputs.assetGlob }}

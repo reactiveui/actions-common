@@ -12,6 +12,7 @@ shared pieces that do that work. Each repository calls them instead of keeping i
 - [Composite actions](#composite-actions)
 - [Steps are written in C#](#steps-are-written-in-c)
 - [How a version is chosen](#how-a-version-is-chosen)
+- [Independent release streams](#independent-release-streams)
 - [Package signing](#package-signing)
 - [The CodeQL pack](#the-codeql-pack)
 - [The release train](#the-release-train)
@@ -128,6 +129,23 @@ Every script follows these rules:
   version, for example for a backport.
 - **The tag comes last.** `workflow-common-create-release.yml` creates the tag at the commit that was built. A
   build or signing failure leaves no tag behind.
+
+## Independent release streams
+
+Each package family uses its own `minverTagPrefix` in `workflow-common-release.yml` and its own solution filter.
+Pass that same prefix as `tagPrefix` to `workflow-common-create-release.yml`. Pass the returned `semver2`, `tag`
+and `sourceSha` as `version`, `tag` and `target`. Set `title` to the family name followed by its version.
+
+ReactiveUI.SourceGenerators uses `v` for the attribute generators and `binding-v` for ReactiveUI.Binding. A release
+computes its next version from that family's tags and packages only its selected projects.
+
+GitReleaseNoteGenerator chooses the most recently published stable release matching `tagPrefix` as the notes
+baseline. Notes end at the built `target` commit, and changelog links use the exact new `tag`. If a family has no
+published stable release, its notes include all history reachable from the built commit. Commits are selected by
+that comparison range, not by package or file path.
+
+Leave `tagPrefix` empty for a repository with one release stream. Its notes use the repository's latest release.
+An empty `title` uses the version as the release title.
 
 ## Package signing
 
