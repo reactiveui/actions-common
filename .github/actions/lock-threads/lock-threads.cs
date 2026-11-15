@@ -27,6 +27,9 @@ var api = GitHubClients.Api(client);
 
 var days = int.Parse(GetEnvironmentVariable("INACTIVE_DAYS") ?? "14", CultureInfo.InvariantCulture);
 
+// GitHub accepts an omitted reason, but rejects the workflow's empty default.
+var lockReason = GetEnvironmentVariable("LOCK_REASON") is { Length: > 0 } reason ? reason : null;
+
 var cutoff = DateTimeOffset.UtcNow.AddDays(-days);
 
 var query = FormattableString.Invariant(
@@ -68,7 +71,7 @@ foreach (var item in results.Items)
         await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
     }
 
-    await api.LockAsync(repository, number, new(GetEnvironmentVariable("LOCK_REASON")), cancellationToken);
+    await api.LockAsync(repository, number, new(lockReason), cancellationToken);
     Console.WriteLine(FormattableString.Invariant($"Locked {kind} #{number}."));
     await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
 }
