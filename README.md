@@ -136,8 +136,13 @@ Each package family uses its own `minverTagPrefix` in `workflow-common-release.y
 Pass that same prefix as `tagPrefix` to `workflow-common-create-release.yml`. Pass the returned `semver2`, `tag`
 and `sourceSha` as `version`, `tag` and `target`. Set `title` to the family name followed by its version.
 
-ReactiveUI.SourceGenerators uses `v` for the attribute generators and `binding-v` for ReactiveUI.Binding. A release
-computes its next version from that family's tags and packages only its selected projects.
+ReactiveUI.SourceGenerators uses one release workflow for both families. One bump input computes the attribute
+generators' version from `v` tags and ReactiveUI.Binding's version from `binding-v` tags. A matrix calls the shared
+release workflow with each computed `versionOverride` and the same resolved `sourceRef` commit.
+
+Set a distinct `artifactSuffix`, such as `-binding`, for each release matrix entry. The shared workflow uses it on
+both `unsigned-nuget` and `signed-nuget`. Publish the signed artifacts together, then use the same family matrix
+to call the create-release workflow. Pass each family's signed artifact name as `artifactName`.
 
 GitReleaseNoteGenerator chooses the most recently published stable release matching `tagPrefix` as the notes
 baseline. Notes end at the built `target` commit, and changelog links use the exact new `tag`. If a family has no
