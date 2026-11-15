@@ -24,8 +24,9 @@ failing log before proposing a cause.
 
 - `actionlint .github/workflows/*.yml` lints the workflows. It does not read the composite actions in
   `.github/actions/`.
-- To compile a script, copy its `.cs` file **outside the repository** and run `dotnet build file.cs`. The
-  repository's `global.json` and analyzers would otherwise apply.
+- Compile scripts in place with `dotnet build path/to/action.cs`. `Directory.Build.props` applies the
+  StyleSharp, PerformanceSharp and SecuritySharp analyzers and treats warnings as errors.
+- All actions use file-based apps. Their `action.yml` passes any shared source paths as MSBuild properties to `dotnet run --file`.
 - `publish-codeql-model-pack.yml` runs on a push to `main` that changes its files. Watch it with `gh run list` and
   read failures with `gh run view <id> --log-failed`.
 - The other workflows only run from a calling repository. Check a change there.
@@ -107,8 +108,8 @@ through its own apphost.
 ### `dotnet run -` and File-Based Apps
 
 - **Arguments follow `--`.** An empty string arrives as an empty argument.
-- **Directives go at the top of the script:** `#:package Name@Version` (`@*` takes the latest), `#:property
-  Key=Value`, `#:sdk`, `#:project` and `#:include`. A property name cannot contain `:`.
+- **Directives go at the top of the script:** `#:package Name@Version`, `#:property Key=Value` and `#:sdk`.
+  Shared source paths belong in `action.yml`, passed through MSBuild properties. A property name cannot contain `:`.
 - **Native AOT is on by default.** Add `#:property PublishAot=false` when a package relies on reflection.
 - **Windows-only APIs need a Windows target framework:** `#:property TargetFramework=net11.0-windows10.0.19041.0`.
 - **The SDK caches each build** by source text, directives, SDK version and nearby build files. Two copies of the

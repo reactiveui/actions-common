@@ -41,4 +41,4 @@ runs:
         RESULTS_FOLDER: ${{ inputs.results-folder }}
         WORK_FOLDER: ${{ inputs.work-folder }}
       working-directory: ${{ runner.temp }}
-      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-update.cs" -- "$ENTRY" "$SETTINGS" "$RESULTS_FOLDER" "$WORK_FOLDER"
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-update.cs" "-p:ActionSharedSources=$GITHUB_ACTION_PATH/../../../scripts/github/*.cs" "-p:ActionLocalSources=$GITHUB_ACTION_PATH/Program.*.cs" -- "$ENTRY" "$SETTINGS" "$RESULTS_FOLDER" "$WORK_FOLDER"

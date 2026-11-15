@@ -86,4 +86,4 @@ runs:
         ON_FAILURE: ${{ inputs.on-failure }}
         DRY_RUN: ${{ inputs.dry-run }}
       working-directory: ${{ runner.temp }}
-      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-plan.cs" -- "$CONFIG" "$TARGETS" "$INCLUDE_DOWNSTREAM" "$EXCLUDE" "$BUMP" "$CHANNEL" "$ON_FAILURE" "$DRY_RUN"
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-plan.cs" "-p:ActionSharedSources=$GITHUB_ACTION_PATH/../../../scripts/github/*.cs" "-p:ActionLocalSources=$GITHUB_ACTION_PATH/Program.*.cs" -- "$CONFIG" "$TARGETS" "$INCLUDE_DOWNSTREAM" "$EXCLUDE" "$BUMP" "$CHANNEL" "$ON_FAILURE" "$DRY_RUN"

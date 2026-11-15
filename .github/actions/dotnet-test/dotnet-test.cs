@@ -1,9 +1,9 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
 
-#:package Microsoft.Extensions.FileSystemGlobbing@*
-
+#:package Microsoft.Extensions.FileSystemGlobbing@11.0.0
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -33,18 +33,20 @@ internal static partial class Program
     private static readonly EnumerationOptions SolutionSearch = new() { AttributesToSkip = 0 };
 
     /// <summary>Runs dotnet test over the solution or the chosen projects.</summary>
-    /// <param name="args">The source folder, solution file, configuration, detailed logging flag, test timeout and test project globs.</param>
+    /// <param name="args">The source folder, solution file, configuration, detailed logging flag, test timeout and
+    /// test project globs.</param>
     /// <returns>The process exit code.</returns>
     internal static int Run(string[] args)
     {
-        if (args is not [var srcFolder, var solutionFile, var configuration, var detailedLogging, var testTimeout, var testProjects])
+        if (args is not [var srcFolder, var solutionFile, var configuration, var detailedLogging,
+            var testTimeout, var testProjects])
         {
-            Console.WriteLine("::error::Expected the source folder, solution file, configuration, detailed logging, test timeout and test projects arguments.");
+            Console.WriteLine(
+                "::error::Expected source folder, solution, configuration, logging, timeout, and test projects.");
             return UsageError;
         }
 
         Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, srcFolder));
-
         if (!File.Exists("testconfig.json"))
         {
             Console.WriteLine(
@@ -55,13 +57,13 @@ internal static partial class Program
 
         var solutionPath = solutionFile is not "" ? solutionFile : FindSolution();
         string[] solution = solutionPath is null ? [] : [SolutionOption, solutionPath];
-
         var patterns = testProjects.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (patterns is not [])
         {
             if (solutionPath is null)
             {
-                Console.WriteLine("::error::test-projects needs a solution to choose projects from; set solution-file.");
+                Console.WriteLine(
+                    "::error::test-projects needs a solution to choose projects from; set solution-file.");
                 return Failure;
             }
 
@@ -73,17 +75,17 @@ internal static partial class Program
             solution = [SolutionOption, filterPath];
         }
 
-        // --verbosity is VSTest-only and ignored by MTP. Synchronous writes keep the log when the runner kills a hung test.
-        string[] diagnostics = detailedLogging is "true"
-            ? ["--diagnostic", "--diagnostic-verbosity", "Trace", "--diagnostic-synchronous-write", "--log-level", "Trace", "--output", "Detailed"]
-            : [];
-
+        // --verbosity is VSTest-only and ignored by MTP. Synchronous writes keep the log when the runner kills a hung
+        // test.
+        string[] diagnostics = detailedLogging is "true" ? ["--diagnostic", "--diagnostic-verbosity", "Trace",
+            "--diagnostic-synchronous-write", "--log-level", "Trace", "--output", "Detailed"] : [];
         string[] timeout = testTimeout is "" ? [] : ["--timeout", testTimeout];
 
         // No --results-directory: parallel test hosts sharing one directory collide on log_<ts>.diag names.
         return Process.Run(
             "dotnet",
-            ["test", .. solution, "--no-build", "--configuration", configuration, .. diagnostics, .. timeout, "--coverage", "--coverage-output-format", "cobertura"]).ExitCode;
+            ["test", .. solution, "--no-build", "--configuration", configuration,
+                .. diagnostics, .. timeout, "--coverage", "--coverage-output-format", "cobertura"]).ExitCode;
     }
 
     /// <summary>Writes a solution filter holding the solution's projects that match the globs.</summary>
@@ -109,14 +111,17 @@ internal static partial class Program
 
         if (projects is [])
         {
-            Console.WriteLine($"::error::No project in {baseSolution} matches test-projects: {string.Join(", ", patterns)}");
+            Console.WriteLine(
+                $"::error::No project in {baseSolution} matches test-projects: {string.Join(", ", patterns)}");
             return null;
         }
 
-        // A solution filter keeps dotnet test running the chosen projects in parallel, as it does for the whole solution.
+        // A solution filter keeps dotnet test running the chosen projects in parallel, as it does for the whole
+        // solution.
         var filterPath = Path.Combine(root, "ci-test-projects.slnf");
-        File.WriteAllBytes(filterPath, JsonSerializer.SerializeToUtf8Bytes(new(new(Path.GetFileName(baseSolution), [.. projects])), SolutionFilterContext.Default.SolutionFilter));
-
+        var filter = new SolutionFilter(new(Path.GetFileName(baseSolution), [.. projects]));
+        var content = JsonSerializer.SerializeToUtf8Bytes(filter, SolutionFilterContext.Default.SolutionFilter);
+        File.WriteAllBytes(filterPath, content);
         Console.WriteLine($"Testing {projects.Count} project(s) matching test-projects:");
         foreach (var project in projects)
         {
@@ -149,7 +154,9 @@ internal static partial class Program
         IReadOnlyList<string>? filtered = null;
         if (solutionPath.EndsWith(".slnf", StringComparison.OrdinalIgnoreCase))
         {
-            var filter = JsonSerializer.Deserialize(File.ReadAllBytes(solutionPath), SolutionFilterContext.Default.SolutionFilter)!;
+            var filter = JsonSerializer.Deserialize(
+                File.ReadAllBytes(solutionPath),
+                SolutionFilterContext.Default.SolutionFilter)!;
             filtered = filter.Solution.Projects;
             solutionPath = Path.Combine(Path.GetDirectoryName(solutionPath) ?? string.Empty, filter.Solution.Path);
         }
@@ -216,7 +223,8 @@ internal static partial class Program
 
     /// <summary>Matches a project line in a .sln file, capturing the project path.</summary>
     /// <returns>The regular expression.</returns>
-    [GeneratedRegex("^Project\\(\"[^\"]*\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+\\.[a-z]+proj)\"", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    [GeneratedRegex("^Project\\(\"[^\"]*\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"([^\"]+\\.[a-z]+proj)\"", RegexOptions.Multiline
+    | RegexOptions.IgnoreCase)]
     private static partial Regex SlnProject();
 
     /// <summary>Source-generated JSON metadata for solution filters.</summary>
@@ -231,5 +239,7 @@ internal static partial class Program
     /// <summary>The solution section of a solution filter.</summary>
     /// <param name="Path">The base solution, relative to the filter.</param>
     /// <param name="Projects">The kept projects, relative to the base solution.</param>
-    private sealed record SolutionFilterSolution([property: JsonRequired] string Path, [property: JsonRequired] string[] Projects);
+    private sealed record SolutionFilterSolution(
+        [property: JsonRequired] string Path,
+        [property: JsonRequired] string[] Projects);
 }

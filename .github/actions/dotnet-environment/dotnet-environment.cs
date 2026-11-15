@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -19,7 +20,8 @@ internal static partial class Program
     private static readonly EnumerationOptions SolutionSearch = new() { AttributesToSkip = 0 };
 
     /// <summary>Restores the workloads for the solution, its filter's base solution, or the solution found in the folder.</summary>
-    /// <param name="args">The source folder, relative to the workspace, and the solution file, relative to it; an empty solution file finds one.</param>
+    /// <param name="args">The source folder, relative to the workspace, and the solution file, relative to it; an
+    /// empty solution file finds one.</param>
     /// <returns>The exit code of dotnet workload restore.</returns>
     internal static int Run(string[] args)
     {
@@ -34,13 +36,18 @@ internal static partial class Program
         // dotnet workload restore does not read a solution filter, so a filter restores its base solution's workloads.
         if (solutionFile.EndsWith(".slnf", StringComparison.OrdinalIgnoreCase))
         {
-            var filter = JsonSerializer.Deserialize(File.ReadAllBytes(solutionFile), SolutionFilterContext.Default.SolutionFilter)!;
+            var filter = JsonSerializer.Deserialize(
+                File.ReadAllBytes(solutionFile),
+                SolutionFilterContext.Default.SolutionFilter)!;
             solutionFile = Path.Combine(Path.GetDirectoryName(solutionFile) ?? string.Empty, filter.Solution.Path);
         }
 
         var found = solutionFile is not "" ? solutionFile : FindSolution();
         string[] solution = found is null ? [] : [found];
-        return Process.Run("dotnet", ["workload", "restore", .. solution, "--from-previous-sdk", "--skip-manifest-update"]).ExitCode;
+        return Process.Run(
+            "dotnet",
+            ["workload", "restore", .. solution, "--from-previous-sdk",
+                "--skip-manifest-update"]).ExitCode;
     }
 
     /// <summary>Finds the solution in the current folder, preferring .slnx over .sln.</summary>

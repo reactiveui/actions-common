@@ -1,7 +1,7 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
-
 // Regenerates the PublicApiSharp baselines for every (project, target framework) pair this host can build.
 // Usage: dotnet run --file publicapi-regenerate.cs -- <src-dir> [tfm-filter] [project-filter]
 // The target frameworks a project offers are host-dependent - the Apple ones only appear where the
@@ -9,6 +9,7 @@
 // further: a comma-separated list of substrings, so `-windows,net4` runs only the Windows-side set.
 // `project-filter` is a comma-separated list of exact project names, for when a type moved and only a
 // couple of projects need rewriting.
+
 using System.Diagnostics;
 using System.Globalization;
 
@@ -41,18 +42,19 @@ foreach (var (project, tfm) in pairs)
     // regenerating in place would leave a stale entry behind and fail the next build.
     _ = Directory.CreateDirectory(Path.GetDirectoryName(baseline)!);
     File.WriteAllText(baseline, string.Empty);
-
     var started = Stopwatch.GetTimestamp();
     var (output, code) = Program.Run(
-        ["format", "analyzers", project, "-f", tfm, "--diagnostics", "PAS0001", "PAS0003", "PAS0004", "--severity", "info", "-v", "m"],
+        ["format", "analyzers", project, "-f", tfm, "--diagnostics", "PAS0001",
+            "PAS0003", "PAS0004", "--severity", "info", "-v", "m"],
         srcDir);
     var elapsed = Stopwatch.GetElapsedTime(started);
-
     var wrote = File.Exists(baseline) && new FileInfo(baseline).Length > 0;
     var failed = code != 0 || !wrote;
-    Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"[{index}/{pairs.Count}] {(failed ? "FAIL" : "ok")} {name} {tfm} ({elapsed.TotalSeconds:F0}s)"));
+    var message = string.Create(
+        CultureInfo.InvariantCulture,
+        $"[{index}/{pairs.Count}] {(failed ? "FAIL" : "ok")} {name} {tfm} ({elapsed.TotalSeconds:F0}s)");
+    Console.WriteLine(message);
     Console.Out.Flush();
-
     if (!failed)
     {
         continue;
@@ -73,7 +75,8 @@ foreach (var (project, tfm) in pairs)
 
 Console.WriteLine();
 
-Console.WriteLine(failures is [] ? $"ALL {pairs.Count} BASELINES REGENERATED" : $"FAILED {failures.Count} of {pairs.Count}:");
+Console.WriteLine(
+    failures is [] ? $"ALL {pairs.Count} BASELINES REGENERATED" : $"FAILED {failures.Count} of {pairs.Count}:");
 
 foreach (var failure in failures)
 {
@@ -101,22 +104,29 @@ internal static partial class Program
     /// <param name="args">The arguments.</param>
     /// <param name="position">The argument position.</param>
     /// <returns>The items, or empty when the argument is missing or empty.</returns>
-    internal static string[] List(string[] args, int position) =>
-        args.Length > position && args[position].Length > 0
-            ? args[position].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            : [];
+    internal static string[] List(string[] args, int position) => args.Length
+    > position
+        && args[position].Length
+    > 0
+        ? args[position].Split(
+            ',',
+            StringSplitOptions.RemoveEmptyEntries
+        | StringSplitOptions.TrimEntries)
+        : [];
 
     /// <summary>Finds the projects that already carry a PublicAPI folder.</summary>
     /// <param name="srcDir">The source folder.</param>
     /// <param name="projectFilters">Exact project names to keep, or empty for all.</param>
     /// <returns>The project files in ordinal order.</returns>
-    /// <exception cref="InvalidOperationException">A folder with a PublicAPI folder does not hold exactly one project file.</exception>
+    /// <exception cref="InvalidOperationException">A folder with a PublicAPI folder does not hold exactly one project
+    /// file.</exception>
     internal static List<string> Projects(string srcDir, string[] projectFilters)
     {
         List<string> projects = [];
         foreach (var directory in Directory.EnumerateDirectories(srcDir))
         {
-            // Test and sample projects switch tracking off in their own Directory.Build.props and must not gain a baseline here.
+            // Test and sample projects switch tracking off in their own Directory.Build.props and must not gain a
+            // baseline here.
             if (!Directory.Exists(Path.Combine(directory, "PublicAPI")))
             {
                 continue;
@@ -128,7 +138,8 @@ internal static partial class Program
                 throw new InvalidOperationException($"{directory} must hold exactly one project file.");
             }
 
-            if (projectFilters is [] || projectFilters.Contains(Path.GetFileNameWithoutExtension(project), StringComparer.Ordinal))
+            if (projectFilters is []
+                || Array.IndexOf(projectFilters, Path.GetFileNameWithoutExtension(project)) >= 0)
             {
                 projects.Add(project);
             }
@@ -155,7 +166,10 @@ internal static partial class Program
                 continue;
             }
 
-            foreach (var tfm in output.Trim().Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            foreach (var tfm in output.Trim().Split(
+                ';',
+                StringSplitOptions.RemoveEmptyEntries
+                | StringSplitOptions.TrimEntries))
             {
                 if (filters is [] || Matches(tfm, filters))
                 {
@@ -174,7 +188,7 @@ internal static partial class Program
     internal static (string Output, int ExitCode) Run(string[] arguments, string workingDirectory)
     {
         var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST") ?? "dotnet";
-        var result = Process.RunAndCaptureText(new ProcessStartInfo(dotnet, arguments) { WorkingDirectory = workingDirectory, RedirectStandardOutput = true, RedirectStandardError = true });
+        var result = Process.RunAndCaptureText(new ProcessStartInfo(dotnet, arguments) { WorkingDirectory = workingDirectory, RedirectStandardOutput = true, RedirectStandardError = true, });
         return (result.StandardOutput + result.StandardError, result.ExitStatus.ExitCode);
     }
 

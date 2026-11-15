@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -43,7 +44,6 @@ internal static partial class Program
         }
 
         Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
-
         var latest = LatestRelease(tagPrefix);
         if (latest is null)
         {
@@ -52,10 +52,13 @@ internal static partial class Program
 
         var last = latest ?? new Version(0, 0, 0);
         var core = Bump(last, bump);
-        var version = preReleaseId is "" ? core.ToString() : $"{core}-{preReleaseId}.{NextCounter(tagPrefix, core, preReleaseId)}";
+        var version = preReleaseId is ""
+            ? core.ToString()
+            : $"{core}-{preReleaseId}.{NextCounter(tagPrefix, core, preReleaseId)}";
         var tag = $"{tagPrefix}{version}";
-        Console.WriteLine($"Latest RTM tag: {tagPrefix}{last} -> next ({bump}{(preReleaseId is "" ? string.Empty : $", {preReleaseId}")}): {tag}");
-
+        Console.WriteLine($"Latest RTM tag: {tagPrefix}{last} -> next ({bump}{(preReleaseId is ""
+            ? string.Empty
+            : $", {preReleaseId}")}): {tag}");
         if (Process.Run("git", ["rev-parse", "-q", "--verify", $"refs/tags/{tag}"], silent: true) is { ExitCode: 0 })
         {
             Console.WriteLine($"::error::Tag {tag} already exists. Refusing to re-release an existing version.");
@@ -66,7 +69,9 @@ internal static partial class Program
 
         // MinVer's MSBuild task stamps this verbatim instead of walking git.
         File.AppendAllText(GetEnvironmentVariable("GITHUB_ENV")!, $"MINVERVERSIONOVERRIDE={version}\n");
-        File.AppendAllText(GetEnvironmentVariable("GITHUB_OUTPUT")!, $"version={version}\ntag={tag}\nprerelease={(preReleaseId is "" ? "false" : "true")}\n");
+        File.AppendAllText(
+            GetEnvironmentVariable("GITHUB_OUTPUT")!,
+            $"version={version}\ntag={tag}\nprerelease={(preReleaseId is "" ? "false" : "true")}\n");
         return 0;
     }
 
@@ -85,7 +90,8 @@ internal static partial class Program
         // No dots, so "<core>-<id>.<N>" has exactly one numeric counter to parse.
         if (preReleaseId is not "" && !PreReleaseIdentifier().IsMatch(preReleaseId))
         {
-            Console.WriteLine($"::error::pre-release-id '{preReleaseId}' must be a SemVer 2.0 alphanumeric/hyphen identifier (no dots).");
+            Console.WriteLine(
+                $"::error::Invalid pre-release-id '{preReleaseId}'. Use letters, digits or hyphens, without dots.");
             return false;
         }
 
@@ -118,7 +124,8 @@ internal static partial class Program
         }
         else
         {
-            Console.WriteLine($"push-tag=false: computed {tag} but not creating it now (deferred, e.g. to GitHub release creation).");
+            Console.WriteLine(
+                $"push-tag=false: computed {tag} but not creating it now (deferred, e.g. to GitHub release creation).");
         }
     }
 
@@ -172,7 +179,11 @@ internal static partial class Program
         var highest = 0;
         foreach (var tag in Lines(Git("tag", "--list", $"{tagPrefix}{core}-{preReleaseId}.[0-9]*")))
         {
-            if (int.TryParse(tag.AsSpan(tag.LastIndexOf('.') + 1), NumberStyles.None, CultureInfo.InvariantCulture, out var counter))
+            if (int.TryParse(
+                tag.AsSpan(tag.LastIndexOf('.') + 1),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var counter))
             {
                 highest = Math.Max(highest, counter);
             }
@@ -200,7 +211,10 @@ internal static partial class Program
     /// <param name="output">The command output.</param>
     /// <returns>The lines.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static string[] Lines(string output) => output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    private static string[] Lines(string output) => output.Split(
+        '\n',
+        StringSplitOptions.RemoveEmptyEntries
+        | StringSplitOptions.TrimEntries);
 
     /// <summary>Parses a captured version segment.</summary>
     /// <param name="group">The captured digits.</param>

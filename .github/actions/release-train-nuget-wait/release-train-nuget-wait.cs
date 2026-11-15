@@ -1,9 +1,9 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
 
 using System.Globalization;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -37,10 +37,15 @@ internal static partial class Program
     /// <returns>The exit code.</returns>
     internal static async Task<int> RunAsync(string releasePath, string timeoutMinutes, TimeProvider clock)
     {
-        var release = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(releasePath).ConfigureAwait(false), NuGetJson.Default.ReleaseRecord)!;
+        var release = JsonSerializer.Deserialize(
+            await File.ReadAllBytesAsync(releasePath).ConfigureAwait(false),
+            NuGetJson.Default.ReleaseRecord)!;
         var version = release.Version.Split('+')[0].ToLowerInvariant();
         HashSet<string> pending = [with(StringComparer.OrdinalIgnoreCase), .. release.Packages];
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(int.Parse(timeoutMinutes, CultureInfo.InvariantCulture)), clock);
+        using var timeout = new CancellationTokenSource(
+            TimeSpan.FromMinutes(
+    int.Parse(timeoutMinutes, CultureInfo.InvariantCulture)),
+            clock);
 
         // Restore reads the flat container, so a version listed there is ready for the next repository.
         while (true)
@@ -53,7 +58,9 @@ internal static partial class Program
 
             if (timeout.IsCancellationRequested)
             {
-                Console.WriteLine($"::error::NuGet did not list {version} of {string.Join(", ", pending)} within {timeoutMinutes} minutes.");
+                Console.WriteLine($"::error::NuGet did not list {version} of {string.Join(
+                    ", ",
+                    pending)} within {timeoutMinutes} minutes.");
                 return Failure;
             }
 
@@ -89,8 +96,10 @@ internal static partial class Program
         {
             try
             {
-                var index = await Http.GetFromJsonAsync(new Uri($"https://api.nuget.org/v3-flatcontainer/{id.ToLowerInvariant()}/index.json"), NuGetJson.Default.FlatContainerIndex)
-                    .ConfigureAwait(false);
+                var index = await Http.GetFromJsonAsync(
+                    new Uri(
+    $"https://api.nuget.org/v3-flatcontainer/{id.ToLowerInvariant()}/index.json"),
+                    NuGetJson.Default.FlatContainerIndex).ConfigureAwait(false);
 
                 // List<string>.Contains compares strings ordinally.
                 if (index?.Versions?.Contains(version) is true)

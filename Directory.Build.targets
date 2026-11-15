@@ -1,0 +1,6 @@
+<Project>
+  <ItemGroup>
+    <Compile Include="$(ActionSharedSources)" Condition="'$(ActionSharedSources)' != ''" />
+    <Compile Include="$(ActionLocalSources)" Condition="'$(ActionLocalSources)' != ''" />
+  </ItemGroup>
+</Project>

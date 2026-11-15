@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -27,37 +28,31 @@ internal static partial class Program
         }
 
         if (args is not
-            [
-                "begin", var workingDirectory, var projectKey, var organization, var hostUrl, var version, var coverageGlob,
-                var extraBeginArgs, var exclusions, var coverageExclusions, var cpdExclusions, var testExclusions,
-            ])
+        ["begin", var workingDirectory, var projectKey, var organization,
+            var hostUrl, var version, var coverageGlob,
+            var extraBeginArgs, var exclusions, var coverageExclusions, var cpdExclusions, var testExclusions,
+        ])
         {
             Console.WriteLine("::error::Expected validate, or begin and the eleven SonarScanner begin arguments.");
             return UsageError;
         }
 
         Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, workingDirectory));
-
         return Process.Run(
             "dotnet",
-            MergeProperties([
-                "sonarscanner", "begin",
-                $"/k:{projectKey}",
-                .. Switch("/o:", organization),
-                $"/d:sonar.host.url={hostUrl}",
-                $"/d:sonar.token={GetEnvironmentVariable("SONAR_TOKEN")}",
-                "/d:sonar.scanner.skipJreProvisioning=true",
-                $"/d:sonar.cs.cobertura.reportsPaths={coverageGlob}",
-                "/d:sonar.issue.ignore.multicriteria=s8969",
-                "/d:sonar.issue.ignore.multicriteria.s8969.ruleKey=csharpsquid:S8969",
-                "/d:sonar.issue.ignore.multicriteria.s8969.resourceKey=**/*.cs",
-                .. Switch("/d:sonar.exclusions=", exclusions),
-                .. Switch("/d:sonar.coverage.exclusions=", coverageExclusions),
-                .. Switch("/d:sonar.cpd.exclusions=", cpdExclusions),
-                .. Switch("/d:sonar.test.exclusions=", testExclusions),
-                .. Switch("/v:", version),
-                .. extraBeginArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries),
-            ])).ExitCode;
+            MergeProperties(["sonarscanner", "begin", $"/k:{projectKey}",
+                    .. Switch("/o:", organization), $"/d:sonar.host.url={hostUrl}",
+                    $"/d:sonar.token={GetEnvironmentVariable("SONAR_TOKEN")}",
+                    "/d:sonar.scanner.skipJreProvisioning=true",
+                    $"/d:sonar.cs.cobertura.reportsPaths={coverageGlob}",
+                    "/d:sonar.issue.ignore.multicriteria=s8969",
+                    "/d:sonar.issue.ignore.multicriteria.s8969.ruleKey=csharpsquid:S8969",
+                    "/d:sonar.issue.ignore.multicriteria.s8969.resourceKey=**/*.cs",
+                    .. Switch("/d:sonar.exclusions=", exclusions),
+                    .. Switch("/d:sonar.coverage.exclusions=", coverageExclusions),
+                    .. Switch("/d:sonar.cpd.exclusions=", cpdExclusions),
+                    .. Switch("/d:sonar.test.exclusions=", testExclusions), .. Switch("/v:", version),
+                    .. extraBeginArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries),])).ExitCode;
     }
 
     /// <summary>Applies extra property values over defaults without repeating scanner switches.</summary>
@@ -70,7 +65,10 @@ internal static partial class Program
         var otherArguments = new List<string>(arguments.Length);
         foreach (var argument in arguments)
         {
-            if (argument.StartsWith(propertyPrefix, StringComparison.OrdinalIgnoreCase) && argument.IndexOf('=') is var separator && separator > propertyPrefix.Length)
+            if (argument.StartsWith(propertyPrefix, StringComparison.OrdinalIgnoreCase)
+                && argument.IndexOf('=') is var separator
+                && separator
+            > propertyPrefix.Length)
             {
                 properties[argument[..separator]] = argument;
             }
@@ -92,7 +90,8 @@ internal static partial class Program
             return 0;
         }
 
-        Console.WriteLine("::error::SONAR_TOKEN is not set in the job/step env. Map the SONAR_TOKEN secret into env on the calling job/step (see this action's description).");
+        Console.WriteLine(
+            "::error::SONAR_TOKEN is missing. Map the secret into the calling job or step environment.");
         return MissingToken;
     }
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -47,13 +48,13 @@ internal static partial class Program
 
     /// <summary>The Unix mode of the CLI: rwxr-xr-x.</summary>
     private const UnixFileMode Executable = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-        | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+    | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
 
     /// <summary>The client for the CLI download.</summary>
     private static readonly HttpClient Http = new();
 
     /// <summary>Gets the options that walk the coverage folder and its subfolders.</summary>
-    internal static EnumerationOptions Recursive { get; } = new() { RecurseSubdirectories = true, AttributesToSkip = 0 };
+    internal static EnumerationOptions Recursive { get; } = new() { RecurseSubdirectories = true, AttributesToSkip = 0, };
 
     /// <summary>Downloads the CLI, checks it against its published SHA-256 and saves it as an executable.</summary>
     /// <param name="url">The CLI download URL; the checksum file is the same URL with .SHA256SUM appended.</param>
@@ -73,7 +74,7 @@ internal static partial class Program
             return false;
         }
 
-        var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, PreallocationSize = binary.Length };
+        var options = new FileStreamOptions { Mode = FileMode.Create, Access = FileAccess.Write, PreallocationSize = binary.Length, };
         if (!OperatingSystem.IsWindows())
         {
             options.UnixCreateMode = Executable;
@@ -81,7 +82,6 @@ internal static partial class Program
 
         await using var stream = new FileStream(path, options);
         await stream.WriteAsync(binary).ConfigureAwait(false);
-
         Console.WriteLine($"Codecov CLI from {url} matches its published SHA-256.");
         return true;
     }

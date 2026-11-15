@@ -1,75 +1,74 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
 
 #:property TargetFramework=net11.0
+#:package Refit@16.4.0
 
-using System.Net.Http.Headers;
 using System.Globalization;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
+using Actions.Common.GitHub;
 using static System.Environment;
 
-using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(9));
+const int OperationMinutes = 9;
+
+using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(OperationMinutes));
+
 var cancellationToken = timeout.Token;
-var repository = GetEnvironmentVariable("GITHUB_REPOSITORY") ?? throw new InvalidOperationException("GITHUB_REPOSITORY is required.");
-using var client = new HttpClient { BaseAddress = new Uri(GetEnvironmentVariable("GITHUB_API_URL") ?? "https://api.github.com") };
-client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", GetEnvironmentVariable("GH_TOKEN"));
-client.DefaultRequestHeaders.UserAgent.ParseAdd("reactiveui-actions-common");
-client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
-client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+
+var repository = GetEnvironmentVariable("GITHUB_REPOSITORY")
+?? throw new InvalidOperationException("GITHUB_REPOSITORY is required.");
+
+var token = GetEnvironmentVariable("GH_TOKEN") ?? throw new InvalidOperationException("GH_TOKEN is required.");
+
+using var client = GitHubClients.Create(token, TimeProvider.System);
+
+var api = GitHubClients.Api(client);
 
 var days = int.Parse(GetEnvironmentVariable("INACTIVE_DAYS") ?? "14", CultureInfo.InvariantCulture);
+
 var cutoff = DateTimeOffset.UtcNow.AddDays(-days);
-var query = Uri.EscapeDataString(FormattableString.Invariant($"repo:{repository} is:closed is:unlocked updated:<{cutoff:yyyy-MM-ddTHH:mm:ssZ}"));
-using var search = await client.GetAsync($"/search/issues?q={query}&sort=updated&order=asc&per_page=50", cancellationToken);
-search.EnsureSuccessStatusCode();
-await using var searchStream = await search.Content.ReadAsStreamAsync(cancellationToken);
-using var results = await JsonDocument.ParseAsync(searchStream, cancellationToken: cancellationToken);
-foreach (var item in results.RootElement.GetProperty("items").EnumerateArray())
+
+var query = FormattableString.Invariant(
+    $"repo:{repository} is:closed is:unlocked updated:<{cutoff:yyyy-MM-ddTHH:mm:ssZ}");
+
+var results = await api.SearchAsync(query, cancellationToken);
+
+foreach (var item in results.Items)
 {
-    var number = item.GetProperty("number").GetInt32();
-    var path = FormattableString.Invariant($"/repos/{repository}/issues/{number}");
-    using var response = await client.GetAsync(path, cancellationToken);
-    response.EnsureSuccessStatusCode();
-    await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-    using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-    var thread = document.RootElement;
+    var number = item.Number;
+    var thread = await api.ThreadAsync(repository, number, cancellationToken);
+
     // Search is indexed asynchronously. Recheck the current state before posting or locking.
-    if (thread.GetProperty("locked").GetBoolean() || thread.GetProperty("state").GetString() != "closed"
-        || thread.GetProperty("updated_at").GetDateTimeOffset() >= cutoff)
+    if (thread.Locked || thread.State is not "closed" || thread.UpdatedAt >= cutoff)
     {
         continue;
     }
 
-    var isPullRequest = thread.TryGetProperty("pull_request", out _);
+    var isPullRequest = thread.PullRequest.HasValue;
     var excludedLabel = GetEnvironmentVariable("EXCLUDE_ISSUE_LABEL");
-    if (!isPullRequest && !string.IsNullOrEmpty(excludedLabel)
-        && thread.GetProperty("labels").EnumerateArray().Any(label => string.Equals(label.GetProperty("name").GetString(), excludedLabel, StringComparison.OrdinalIgnoreCase)))
+    if (!isPullRequest && !string.IsNullOrEmpty(excludedLabel) && Array.Exists(
+        thread.Labels,
+        label => string.Equals(label.Name, excludedLabel, StringComparison.OrdinalIgnoreCase)))
     {
         continue;
     }
 
     var kind = isPullRequest ? "pull request" : "issue";
-    var body = $"This {kind} has been automatically locked since there has not been any recent activity after it was closed. Please open a new issue for related bugs.";
-    if (GetEnvironmentVariable("POST_COMMENT") != "false")
+    if (GetEnvironmentVariable("POST_COMMENT") is not "false")
     {
-        using var content = new StringContent(new JsonObject { ["body"] = body }.ToJsonString(), Encoding.UTF8, "application/json");
-        using var comment = await client.PostAsync($"{path}/comments", content, cancellationToken);
-        comment.EnsureSuccessStatusCode();
+        var body = $"This {kind} has been automatically locked since there has not been any recent activity after it was closed. Please open a new issue for related bugs.";
+        await api.CommentAsync(repository, number, new(body), cancellationToken);
+        await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
     }
 
     if (!isPullRequest && GetEnvironmentVariable("ADD_ISSUE_LABEL") is { Length: > 0 } label)
     {
-        using var content = new StringContent(new JsonObject { ["labels"] = new JsonArray(label) }.ToJsonString(), Encoding.UTF8, "application/json");
-        using var labeled = await client.PostAsync($"{path}/labels", content, cancellationToken);
-        labeled.EnsureSuccessStatusCode();
+        await api.LabelAsync(repository, number, new([label]), cancellationToken);
+        await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
     }
 
-    var reason = GetEnvironmentVariable("LOCK_REASON");
-    using var lockContent = string.IsNullOrEmpty(reason) ? null : new StringContent(new JsonObject { ["lock_reason"] = reason }.ToJsonString(), Encoding.UTF8, "application/json");
-    using var locked = await client.PutAsync($"{path}/lock", lockContent, cancellationToken);
-    locked.EnsureSuccessStatusCode();
+    await api.LockAsync(repository, number, new(GetEnvironmentVariable("LOCK_REASON")), cancellationToken);
     Console.WriteLine(FormattableString.Invariant($"Locked {kind} #{number}."));
+    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
 }

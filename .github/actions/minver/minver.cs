@@ -1,10 +1,10 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
-
 // Process start looks in the app's own folder before PATH, so an app named minver would run itself instead of the tool.
-#:property AssemblyName=minver-action
 
+#:property AssemblyName=minver-action
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -19,18 +19,20 @@ internal static partial class Program
     private const int UsageError = 2;
 
     /// <summary>Computes the version and writes GITHUB_ENV and GITHUB_OUTPUT.</summary>
-    /// <param name="args">The tag prefix, minimum major.minor, pre-release identifiers, auto-increment, verbosity and version override.</param>
+    /// <param name="args">The tag prefix, minimum major.minor, pre-release identifiers, auto-increment, verbosity and
+    /// version override.</param>
     /// <returns>The process exit code.</returns>
     internal static int Run(string[] args)
     {
-        if (args is not [var tagPrefix, var minimumMajorMinor, var defaultPreRelease, var autoIncrement, var verbosity, var versionOverride])
+        if (args is not [var tagPrefix, var minimumMajorMinor, var defaultPreRelease, var autoIncrement,
+            var verbosity, var versionOverride])
         {
-            Console.WriteLine("::error::Expected the tag prefix, minimum major.minor, pre-release identifiers, auto-increment, verbosity and version override arguments.");
+            Console.WriteLine(
+                "::error::Expected prefix, floor, pre-release, increment, verbosity, and override.");
             return UsageError;
         }
 
         Directory.SetCurrentDirectory(GetEnvironmentVariable("GITHUB_WORKSPACE")!);
-
         string semVer2;
         if (versionOverride is not "")
         {
@@ -41,12 +43,10 @@ internal static partial class Program
         {
             var minver = Process.RunAndCaptureText(
                 "minver",
-                [
-                    "--tag-prefix", tagPrefix, "--verbosity", verbosity, "--auto-increment", autoIncrement,
+                ["--tag-prefix", tagPrefix, "--verbosity",
+                    verbosity, "--auto-increment", autoIncrement,
                     .. Option("--minimum-major-minor", minimumMajorMinor),
-                    .. Option("--default-pre-release-identifiers", defaultPreRelease),
-                ]);
-
+                    .. Option("--default-pre-release-identifiers", defaultPreRelease),]);
             Console.Error.Write(minver.StandardError);
             if (minver is not { ExitStatus.ExitCode: 0, StandardOutput: var output })
             {
@@ -68,28 +68,29 @@ internal static partial class Program
     {
         // SemVer2 is "<major>.<minor>.<patch>[-<pre>][+<meta>]".
         var core = semVer2.AsSpan()[..End(semVer2, '-', '+')].ToString();
-        var preRelease = semVer2.AsSpan(core.Length) is ['-', .. var rest] ? rest[..End(rest, '+', '+')].ToString() : string.Empty;
-        var height = Process.RunAndCaptureText("git", ["describe", "--tags", "--abbrev=0", "--match", $"{tagPrefix}*"]) switch
+        var preRelease = semVer2.AsSpan(core.Length) is ['-', .. var rest]
+            ? rest[..End(rest, '+', '+')].ToString()
+            : string.Empty;
+        var height = Process.RunAndCaptureText(
+            "git",
+            ["describe", "--tags", "--abbrev=0", "--match",
+                $"{tagPrefix}*"]) switch
         {
-            { ExitStatus.ExitCode: 0, StandardOutput: var lastTag } => Git("rev-list", "--count", $"{lastTag.Trim()}..HEAD"),
+            { ExitStatus.ExitCode: 0, StandardOutput: var lastTag } => Git(
+                "rev-list",
+                "--count",
+                $"{lastTag.Trim()}..HEAD"),
             _ => Git("rev-list", "--count", "HEAD"),
         };
-
         (string Name, string Value)[] values =
-        [
-            ("SemVer2", semVer2),
-            ("SimpleVersion", core),
+        [("SemVer2", semVer2), ("SimpleVersion", core),
             ("AssemblyVersion", $"{core.AsSpan()[..Major(core)]}.0.0.0"),
-            ("AssemblyFileVersion", $"{core}.0"),
-            ("AssemblyInformationalVersion", semVer2),
+            ("AssemblyFileVersion", $"{core}.0"), ("AssemblyInformationalVersion", semVer2),
 
             // Package feeds reject build metadata, so the NuGet version drops it.
             ("NuGetPackageVersion", preRelease is "" ? core : $"{core}-{preRelease}"),
             ("GitCommitId", Git("rev-parse", "HEAD")),
-            ("GitCommitIdShort", Git("rev-parse", "--short=7", "HEAD")),
-            ("VersionHeight", height),
-        ];
-
+            ("GitCommitIdShort", Git("rev-parse", "--short=7", "HEAD")), ("VersionHeight", height),];
         var environment = new StringBuilder();
         var outputs = new StringBuilder();
         foreach (var (name, value) in values)
@@ -110,7 +111,10 @@ internal static partial class Program
     /// <param name="second">The second separator.</param>
     /// <returns>The length of the leading part, or the whole length when neither separator occurs.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int End(ReadOnlySpan<char> value, char first, char second) => value.IndexOfAny(first, second) is var end and >= 0 ? end : value.Length;
+    private static int End(
+        ReadOnlySpan<char> value,
+        char first,
+        char second) => value.IndexOfAny(first, second) is var end and >= 0 ? end : value.Length;
 
     /// <summary>Finds the length of the major segment.</summary>
     /// <param name="core">The major.minor.patch text.</param>
@@ -128,5 +132,6 @@ internal static partial class Program
     /// <param name="arguments">The git arguments.</param>
     /// <returns>The trimmed output.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static string Git(params IEnumerable<string> arguments) => Process.RunAndCaptureText("git", arguments).StandardOutput.Trim();
+    private static string Git(
+        params IEnumerable<string> arguments) => Process.RunAndCaptureText("git", arguments).StandardOutput.Trim();
 }
