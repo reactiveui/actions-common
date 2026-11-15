@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>preview</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="StyleSharp.Analyzers" Version="5.2.0" PrivateAssets="all" />
+    <PackageReference Include="PerformanceSharp.Analyzers" Version="5.2.0" PrivateAssets="all" />
+    <PackageReference Include="SecuritySharp.Analyzers" Version="5.2.0" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

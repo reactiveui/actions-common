@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -5,7 +6,9 @@
 using System.Runtime.CompilerServices;
 using static System.Environment;
 
-var root = Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE") ?? Directory.GetCurrentDirectory(), "benchmark-artifacts");
+var root = Path.Combine(
+    GetEnvironmentVariable("GITHUB_WORKSPACE") ?? Directory.GetCurrentDirectory(),
+    "benchmark-artifacts");
 
 // BenchmarkDotNet exits zero on a validation error, so the exported reports are the evidence it ran.
 var reports = Program.Reports(root);
@@ -51,7 +54,7 @@ internal static partial class Program
             return [];
         }
 
-        var reports = Directory.GetFiles(root, $"*{ReportSuffix}", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 });
+        var reports = Directory.GetFiles(root, $"*{ReportSuffix}", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, });
         Array.Sort(reports, StringComparer.Ordinal);
         return reports;
     }
@@ -60,7 +63,10 @@ internal static partial class Program
     /// <param name="report">The report path.</param>
     /// <returns>The title.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static string Title(string report) => Path.GetFileName(report).Replace(ReportSuffix, string.Empty, StringComparison.Ordinal);
+    internal static string Title(string report) => Path.GetFileName(report).Replace(
+        ReportSuffix,
+        string.Empty,
+        StringComparison.Ordinal);
 
     /// <summary>Counts the table rows that hold a cell of exactly NA.</summary>
     /// <param name="report">The report path.</param>

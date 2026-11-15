@@ -31,4 +31,4 @@ runs:
         TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
         WORK_FOLDER: ${{ inputs.work-folder }}
       working-directory: ${{ runner.temp }}
-      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-release.cs" -- "$ENTRY" "$TIMEOUT_MINUTES" "$WORK_FOLDER"
+      run: dotnet run --file "$GITHUB_ACTION_PATH/release-train-release.cs" "-p:ActionSharedSources=$GITHUB_ACTION_PATH/../../../scripts/github/*.cs" "-p:ActionLocalSources=$GITHUB_ACTION_PATH/Program.*.cs" -- "$ENTRY" "$TIMEOUT_MINUTES" "$WORK_FOLDER"

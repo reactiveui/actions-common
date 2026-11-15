@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -9,13 +10,23 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using static System.Environment;
 
-if (args is not [var name, var repository, var blocked, var reason, var updateOutcome, var releaseOutcome, var nugetOutcome, var pullRequest, var runUrl, var reused, var workDir, var resultDir])
+if (args is not [var name, var repository, var blocked, var reason, var updateOutcome, var releaseOutcome,
+    var nugetOutcome, var pullRequest, var runUrl, var reused, var workDir, var resultDir])
 {
-    Console.WriteLine("::error::Expected the name, repository, blocked, reason, step outcomes, pull request, run URL, reused, work folder and result folder arguments.");
+    Console.WriteLine(
+        "::error::Expected name, repository, blocked, reason, outcomes, PR, run URL, reused, work and result folders.");
     return Program.UsageError;
 }
 
-var outcomes = new StepOutcomes(blocked, reason, updateOutcome, releaseOutcome, nugetOutcome, pullRequest, reused is Program.True);
+var outcomes = new StepOutcomes(
+    blocked,
+    reason,
+    updateOutcome,
+    releaseOutcome,
+    nugetOutcome,
+    pullRequest,
+    reused
+    is Program.True);
 
 return await Program.RunAsync(name, repository, outcomes, runUrl, workDir, resultDir).ConfigureAwait(false);
 
@@ -42,11 +53,19 @@ internal static partial class Program
     /// <param name="workDir">The folder holding release.json and updates.json.</param>
     /// <param name="resultDir">The folder for the result file.</param>
     /// <returns>The exit code.</returns>
-    internal static async Task<int> RunAsync(string name, string repository, StepOutcomes outcomes, string runUrl, string workDir, string resultDir)
+    internal static async Task<int> RunAsync(
+        string name,
+        string repository,
+        StepOutcomes outcomes,
+        string runUrl,
+        string workDir,
+        string resultDir)
     {
         // A step that did not run wrote no file, which reads as a record with no values.
-        var release = await ReadAsync(Path.Combine(workDir, "release.json"), RecordJson.Default.ReleaseRecord).ConfigureAwait(false) ?? new(null, null, null, null);
-        var updates = await ReadAsync(Path.Combine(workDir, "updates.json"), RecordJson.Default.UpdateLog).ConfigureAwait(false) ?? new(null, null);
+        var release = await ReadAsync(Path.Combine(workDir, "release.json"), RecordJson.Default.ReleaseRecord)
+            .ConfigureAwait(false) ?? new(null, null, null, null);
+        var updates = await ReadAsync(Path.Combine(workDir, "updates.json"), RecordJson.Default.UpdateLog)
+            .ConfigureAwait(false) ?? new(null, null);
         var (status, message) = Outcome(name, outcomes, release);
         var result = new TrainResult(
             name,
@@ -62,12 +81,13 @@ internal static partial class Program
             CloneOrEmpty(release.Packages),
             CloneOrEmpty(updates.Updates),
             CloneOrEmpty(updates.Notes));
-
         _ = Directory.CreateDirectory(resultDir);
-        await File.WriteAllBytesAsync(Path.Combine(resultDir, $"{name}.json"), JsonSerializer.SerializeToUtf8Bytes(result, RecordJson.Default.TrainResult)).ConfigureAwait(false);
-
+        await File.WriteAllBytesAsync(
+            Path.Combine(resultDir, $"{name}.json"),
+            JsonSerializer.SerializeToUtf8Bytes(result, RecordJson.Default.TrainResult)).ConfigureAwait(false);
         StringBuilder summary = new();
-        _ = summary.AppendLine(CultureInfo.InvariantCulture, $"## {repository}: {status}").AppendLine().AppendLine(message).AppendLine();
+        _ = summary.AppendLine(CultureInfo.InvariantCulture, $"## {repository}: {status}")
+            .AppendLine().AppendLine(message).AppendLine();
         if (result.PullRequest is { } link)
         {
             _ = summary.AppendLine(CultureInfo.InvariantCulture, $"Pull request: {link}").AppendLine();
@@ -78,7 +98,8 @@ internal static partial class Program
             _ = summary.AppendLine(CultureInfo.InvariantCulture, $"Release: {releaseUrl}").AppendLine();
         }
 
-        await File.AppendAllTextAsync(GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!, summary.ToString()).ConfigureAwait(false);
+        await File.AppendAllTextAsync(GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!, summary.ToString())
+            .ConfigureAwait(false);
         return 0;
     }
 
@@ -87,13 +108,17 @@ internal static partial class Program
     /// <param name="outcomes">The step outputs and outcomes.</param>
     /// <param name="release">The release record.</param>
     /// <returns>The status and message.</returns>
-    private static (string Status, string Message) Outcome(string name, StepOutcomes outcomes, ReleaseRecord release) =>
-        (outcomes.Blocked, outcomes.Nuget, FailedStep(outcomes)) switch
+    private static (string Status, string Message) Outcome(
+        string name,
+        StepOutcomes outcomes,
+        ReleaseRecord release) => (outcomes.Blocked, outcomes.Nuget, FailedStep(outcomes)) switch
         {
             (True, _, _) => ("blocked", outcomes.Reason),
-            (_, "success", _) when outcomes.Reused => ("released", $"{release.Version} was already released at the head of the branch. The train reused it."),
+            (_, "success", _) when outcomes.Reused =>
+                ("released", $"Reused {release.Version}, already released at the branch head."),
             (_, "success", _) => ("released", $"Released {release.Version}."),
-            (_, _, UpdateStep) when outcomes.PullRequest is not "" => (Failed, $"The dependency pull request did not merge. Fix {outcomes.PullRequest}, merge it, then resume the train from {name}."),
+            (_, _, UpdateStep) when outcomes.PullRequest is not "" =>
+                (Failed, $"Fix and merge {outcomes.PullRequest}, then resume the train from {name}."),
             (_, _, { } step) => (Failed, $"Failed at {step}."),
             _ => (Failed, "The job stopped before it finished."),
         };
@@ -136,9 +161,14 @@ internal static partial class Program
     /// <param name="path">The file.</param>
     /// <param name="type">The JSON contract.</param>
     /// <returns>The record, or null when the step that writes it did not run.</returns>
-    private static async Task<T?> ReadAsync<T>(string path, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> type)
-        where T : class =>
-        File.Exists(path) ? JsonSerializer.Deserialize(await File.ReadAllBytesAsync(path).ConfigureAwait(false), type) : null;
+    private static async Task<T?> ReadAsync<T>(
+        string path,
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> type)
+        where T : class => File.Exists(path)
+            ? JsonSerializer.Deserialize(
+                await File.ReadAllBytesAsync(path).ConfigureAwait(false),
+                type)
+            : null;
 
     /// <summary>The JSON contract for the step files and the result.</summary>
     [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
@@ -155,7 +185,14 @@ internal static partial class Program
     /// <param name="Nuget">The NuGet wait step outcome.</param>
     /// <param name="PullRequest">The dependency pull request, or empty.</param>
     /// <param name="Reused">Whether the train reused an earlier release.</param>
-    internal sealed record StepOutcomes(string Blocked, string Reason, string Update, string Release, string Nuget, string PullRequest, bool Reused);
+    internal sealed record StepOutcomes(
+        string Blocked,
+        string Reason,
+        string Update,
+        string Release,
+        string Nuget,
+        string PullRequest,
+        bool Reused);
 
     /// <summary>The release.json record the release step wrote.</summary>
     /// <param name="Version">The released version.</param>

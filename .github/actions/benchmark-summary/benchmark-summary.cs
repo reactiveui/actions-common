@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -17,24 +18,23 @@ var budget = long.Parse(budgetKb, CultureInfo.InvariantCulture) * Program.Kibiby
 
 var summary = GetEnvironmentVariable("GITHUB_STEP_SUMMARY") ?? string.Empty;
 
-var root = Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE") ?? Directory.GetCurrentDirectory(), "benchmark-artifacts");
+var root = Path.Combine(
+    GetEnvironmentVariable("GITHUB_WORKSPACE") ?? Directory.GetCurrentDirectory(),
+    "benchmark-artifacts");
 
-// With a revision input the triggering commit is not the measured one, so the checked-out commit MinVer read comes first.
+// With a revision input the triggering commit is not the measured one, so the checked-out commit MinVer read comes
+// first.
 var commit = GetEnvironmentVariable("MINVER_GitCommitId") ?? GetEnvironmentVariable("GITHUB_SHA");
 
 Program.AppendLines(
     summary,
-    [
-        "# Benchmark results",
-        string.Empty,
+    ["# Benchmark results", string.Empty,
         $"Filter `{filter}`, commit `{commit}`, measured on `{GetEnvironmentVariable("RUNNER_OS")}`.",
         string.Empty,
         "Each section is one benchmark class. The runtimes measured are whichever jobs that class",
         "declares, so a class with no NativeAOT row cannot run ahead-of-time at all. A hosted runner",
         "is shared, so read these for trend and regression rather than as absolute figures.",
-        $"Full JSON, HTML and CSV exports are attached to this run as `{artifactName}`.",
-        string.Empty,
-    ]);
+        $"Full JSON, HTML and CSV exports are attached to this run as `{artifactName}`.", string.Empty,]);
 
 var reports = Program.Reports(root);
 
@@ -55,12 +55,19 @@ foreach (var report in reports)
         continue;
     }
 
-    Program.AppendLines(summary, [$"<details><summary>{title}</summary>", string.Empty, .. File.ReadLines(report), string.Empty, "</details>", string.Empty]);
+    Program.AppendLines(
+        summary,
+        [$"<details><summary>{title}</summary>", string.Empty,
+            .. File.ReadLines(report), string.Empty, "</details>", string.Empty]);
 }
 
 if (skipped is not [])
 {
-    Program.AppendLines(summary, [string.Empty, $"Omitted here to stay inside the summary limit: {string.Join(", ", skipped)}. Read them in the {artifactName} artifact.", string.Empty]);
+    Program.AppendLines(
+        summary,
+        [string.Empty, $"Omitted here to stay inside the summary limit: {string.Join(
+    ", ",
+    skipped)}. Read them in the {artifactName} artifact.", string.Empty]);
 }
 
 /// <summary>Appends the benchmark reports to the run summary, within a size budget.</summary>
@@ -96,7 +103,7 @@ internal static partial class Program
             return [];
         }
 
-        var reports = Directory.GetFiles(root, $"*{ReportSuffix}", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 });
+        var reports = Directory.GetFiles(root, $"*{ReportSuffix}", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, });
         Array.Sort(reports, StringComparer.Ordinal);
         return reports;
     }
@@ -105,5 +112,8 @@ internal static partial class Program
     /// <param name="report">The report path.</param>
     /// <returns>The title.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static string Title(string report) => Path.GetFileName(report).Replace(ReportSuffix, string.Empty, StringComparison.Ordinal);
+    internal static string Title(string report) => Path.GetFileName(report).Replace(
+        ReportSuffix,
+        string.Empty,
+        StringComparison.Ordinal);
 }

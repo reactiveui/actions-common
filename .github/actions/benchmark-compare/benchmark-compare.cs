@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -20,7 +21,9 @@ var baseResults = Program.Load(baseFolder);
 
 var headResults = Program.Load(headFolder);
 
-File.AppendAllText(GetEnvironmentVariable("GITHUB_STEP_SUMMARY") ?? string.Empty, Program.Table(baseResults, headResults));
+File.AppendAllText(
+    GetEnvironmentVariable("GITHUB_STEP_SUMMARY") ?? string.Empty,
+    Program.Table(baseResults, headResults));
 
 return 0;
 
@@ -39,7 +42,7 @@ internal static partial class Program
     internal static Dictionary<string, Measurement> Load(string folder)
     {
         var results = new Dictionary<string, Measurement>(StringComparer.Ordinal);
-        foreach (var path in Directory.EnumerateFiles(folder, "*full.json", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 }))
+        foreach (var path in Directory.EnumerateFiles(folder, "*full.json", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0, }))
         {
             using var stream = File.OpenRead(path);
             var report = JsonSerializer.Deserialize(stream, ReportJsonContext.Default.Report);
@@ -61,13 +64,14 @@ internal static partial class Program
     /// <param name="baseResults">The baseline measurements.</param>
     /// <param name="headResults">The head measurements.</param>
     /// <returns>The table.</returns>
-    internal static string Table(Dictionary<string, Measurement> baseResults, Dictionary<string, Measurement> headResults)
+    internal static string Table(
+        Dictionary<string, Measurement> baseResults,
+        Dictionary<string, Measurement> headResults)
     {
         var keys = new HashSet<string>(baseResults.Keys, StringComparer.Ordinal);
         keys.UnionWith(headResults.Keys);
         string[] ordered = [.. keys];
         Array.Sort(ordered, StringComparer.Ordinal);
-
         var table = new StringBuilder();
         _ = table.Append("# A/B benchmark results").Append(NewLine).Append(NewLine);
         _ = table.Append("| Benchmark | Base | Head | Head/Base | Result |").Append(NewLine);
@@ -85,19 +89,29 @@ internal static partial class Program
     /// <param name="key">The benchmark key.</param>
     /// <param name="baseResults">The baseline measurements.</param>
     /// <param name="headResults">The head measurements.</param>
-    private static void AppendRow(StringBuilder table, string key, Dictionary<string, Measurement> baseResults, Dictionary<string, Measurement> headResults)
+    private static void AppendRow(
+        StringBuilder table,
+        string key,
+        Dictionary<string, Measurement> baseResults,
+        Dictionary<string, Measurement> headResults)
     {
         var hasBase = baseResults.TryGetValue(key, out var before);
         var hasHead = headResults.TryGetValue(key, out var after);
         if (hasBase && hasHead)
         {
-            _ = table.Append(CultureInfo.InvariantCulture, $"| {key} | {Format(before)} | {Format(after)} | {after.Mean / before.Mean:0.000} | {Verdict(before, after)} |").Append(NewLine);
+            _ = table.Append(
+                CultureInfo.InvariantCulture,
+                $"| {key} | {Format(before)} | {Format(after)} | {after.Mean
+                / before.Mean:0.000} | {Verdict(before, after)} |").Append(NewLine);
             return;
         }
 
         var baseCell = hasBase ? Format(before) : Missing;
         var headCell = hasHead ? Format(after) : Missing;
-        _ = table.Append(CultureInfo.InvariantCulture, $"| {key} | {baseCell} | {headCell} | {Missing} | {(hasBase ? "base only" : "head only")} |").Append(NewLine);
+        _ = table.Append(
+            CultureInfo.InvariantCulture,
+            $"| {key} | {baseCell} | {headCell} | {Missing} | {(hasBase ? "base only" : "head only")} |")
+            .Append(NewLine);
     }
 
     /// <summary>Judges the head against the base by whether their confidence intervals overlap.</summary>
@@ -139,7 +153,6 @@ internal static partial class Program
             >= Microsecond => (Microsecond, "us"),
             _ => (Nanosecond, "ns"),
         };
-
         var margin = (measurement.Upper - measurement.Mean) / scale;
         return string.Create(CultureInfo.InvariantCulture, $"{measurement.Mean / scale:0.00} ± {margin:0.00} {unit}");
     }

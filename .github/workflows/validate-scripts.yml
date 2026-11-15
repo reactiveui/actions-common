@@ -1,0 +1,73 @@
+name: Analyze action scripts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source: .github/actions/aot-smoke-run/aot-smoke-run.cs
+          - source: .github/actions/benchmark-compare/benchmark-compare.cs
+          - source: .github/actions/benchmark-run/benchmark-run.cs
+          - source: .github/actions/benchmark-summary/benchmark-summary.cs
+          - source: .github/actions/benchmark-validate/benchmark-validate.cs
+          - source: .github/actions/certum-sign/certum-sign.cs
+          - source: .github/actions/codecov-upload/codecov-upload.cs
+          - source: .github/actions/codeql-pack-publish/codeql-pack-publish.cs
+          - source: .github/actions/codeql-pack-version/codeql-pack-version.cs
+          - source: .github/actions/compute-version-and-tag/compute-version-and-tag.cs
+          - source: .github/actions/detect-changes/detect-changes.cs
+          - source: .github/actions/dotnet-benchmarks/dotnet-benchmarks.cs
+          - source: .github/actions/dotnet-build-uno/dotnet-build-uno.cs
+          - source: .github/actions/dotnet-environment/dotnet-environment.cs
+          - source: .github/actions/dotnet-test/dotnet-test.cs
+          - source: .github/actions/github-packages-push/github-packages-push.cs
+          - source: .github/actions/github-release-create/github-release-create.cs
+          - source: .github/actions/lock-threads/lock-threads.cs
+            directory: .github/actions/lock-threads
+          - source: .github/actions/minver/minver.cs
+          - source: .github/actions/publicapi-regenerate/publicapi-regenerate.cs
+          - source: .github/actions/release-inputs-validate/release-inputs-validate.cs
+          - source: .github/actions/release-tag-resolve/release-tag-resolve.cs
+          - source: .github/actions/release-train-nuget-wait/release-train-nuget-wait.cs
+          - source: .github/actions/release-train-plan/release-train-plan.cs
+            directory: .github/actions/release-train-plan
+          - source: .github/actions/release-train-record/release-train-record.cs
+          - source: .github/actions/release-train-release/release-train-release.cs
+            directory: .github/actions/release-train-release
+          - source: .github/actions/release-train-summary/release-train-summary.cs
+          - source: .github/actions/release-train-update/release-train-update.cs
+            directory: .github/actions/release-train-update
+          - source: .github/actions/sonarcloud/sonarcloud.cs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v5
+        with:
+          dotnet-version: 11.0.x
+      - name: Build scripts with analyzers
+        if: matrix.directory == ''
+        working-directory: ${{ runner.temp }}
+        env:
+          ACTION_SOURCE: ${{ matrix.source }}
+        run: dotnet build "$GITHUB_WORKSPACE/$ACTION_SOURCE" -v q -nologo -clp:ErrorsOnly
+
+      - name: Build actions with shared sources
+        if: matrix.directory != ''
+        working-directory: ${{ runner.temp }}
+        env:
+          ACTION_SOURCE: ${{ matrix.source }}
+          ACTION_DIRECTORY: ${{ matrix.directory }}
+        run: dotnet build "$GITHUB_WORKSPACE/$ACTION_SOURCE" "-p:ActionSharedSources=$GITHUB_WORKSPACE/scripts/github/*.cs" "-p:ActionLocalSources=$GITHUB_WORKSPACE/$ACTION_DIRECTORY/Program.*.cs" -v q -nologo -clp:ErrorsOnly

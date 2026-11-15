@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -27,20 +28,19 @@ internal static partial class Program
 
         // A short build path on Windows keeps the NativeAOT build under 260 characters.
         var output = OperatingSystem.IsWindows() ? @"C:\a" : Path.Combine(GetEnvironmentVariable("RUNNER_TEMP")!, "a");
-
         RaisePriority();
         Directory.SetCurrentDirectory(Path.Combine(GetEnvironmentVariable("GITHUB_WORKSPACE")!, "src"));
-
-        foreach (var project in projects.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var project in projects.Split(
+            '\n',
+            StringSplitOptions.RemoveEmptyEntries
+            | StringSplitOptions.TrimEntries))
         {
             var name = Path.GetFileNameWithoutExtension(project);
             var status = Process.Run(
                 "dotnet",
-                [
-                    "run", "--project", project, "-c", "Release", "-f", "net10.0", "--artifacts-path", output, "--",
-                    "--filter", "*", "--artifacts", Path.Combine(results, name), "--exporters", "github", "fulljson",
-                ]);
-
+                ["run", "--project", project, "-c", "Release", "-f", "net10.0",
+                    "--artifacts-path", output, "--", "--filter", "*", "--artifacts",
+                    Path.Combine(results, name), "--exporters", "github", "fulljson",]);
             if (status is { ExitCode: not 0 })
             {
                 return status.ExitCode;
@@ -50,7 +50,8 @@ internal static partial class Program
         return 0;
     }
 
-    /// <summary>Raises this process's priority; processes started from here inherit it on Unix, and on Windows BenchmarkDotNet raises its own.</summary>
+    /// <summary>Raises this process's priority; processes started from here inherit it on Unix, and on Windows
+    /// BenchmarkDotNet raises its own.</summary>
     private static void RaisePriority()
     {
         try

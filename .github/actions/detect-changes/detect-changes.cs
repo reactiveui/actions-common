@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -34,10 +35,13 @@ internal static partial class Program
         var baseline = eventName switch
         {
             "pull_request" => "HEAD^1",
-            "push" when before.Trim('0') is not "" && Process.Run("git", ["fetch", "--no-tags", "--depth=1", "origin", before]) is { ExitCode: 0 } => before,
+            "push" when before.Trim('0') is not ""
+                && Process.Run(
+                    "git",
+                    ["fetch", "--no-tags", "--depth=1", "origin",
+                    before]) is { ExitCode: 0 } => before,
             _ => null,
         };
-
         var files = baseline is null ? [] : ChangedFiles(baseline);
 
         // With nothing to compare, both areas count as changed so every job runs.
@@ -51,17 +55,24 @@ internal static partial class Program
         }
 
         Console.WriteLine($"Changed files: {files.Length}. Code: {code}. Workflows: {workflows}.");
-        File.AppendAllText(GetEnvironmentVariable("GITHUB_OUTPUT")!, $"code={(code ? "true" : "false")}\nworkflows={(workflows ? "true" : "false")}\n");
+        File.AppendAllText(
+            GetEnvironmentVariable("GITHUB_OUTPUT")!,
+            $"code={(code ? "true" : "false")}\nworkflows={(workflows ? "true" : "false")}\n");
         return 0;
     }
 
     /// <summary>Lists the files changed between a baseline and HEAD.</summary>
     /// <param name="baseline">The commit to compare against.</param>
     /// <returns>The changed paths, or none when git cannot compare them.</returns>
-    private static string[] ChangedFiles(string baseline) =>
-        Process.RunAndCaptureText("git", ["diff", "--name-only", baseline, "HEAD"]) switch
-        {
-            { ExitStatus.ExitCode: 0, StandardOutput: var output } => output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-            _ => [],
-        };
+    private static string[] ChangedFiles(string baseline) => Process.RunAndCaptureText(
+        "git",
+        ["diff",
+            "--name-only", baseline, "HEAD"]) switch
+    {
+        { ExitStatus.ExitCode: 0, StandardOutput: var output } => output.Split(
+            '\n',
+            StringSplitOptions.RemoveEmptyEntries
+            | StringSplitOptions.TrimEntries),
+        _ => [],
+    };
 }

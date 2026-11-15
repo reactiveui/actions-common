@@ -1,3 +1,4 @@
+#!/usr/bin/env dotnet run
 // Copyright (c) 2019-2026 ReactiveUI and Contributors. All rights reserved.
 // ReactiveUI and Contributors licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for full license information.
@@ -26,7 +27,9 @@ var summary = Summary(plan, results, remaining);
 
 await File.AppendAllTextAsync(GetEnvironmentVariable("GITHUB_STEP_SUMMARY")!, summary).ConfigureAwait(false);
 
-await File.AppendAllTextAsync(GetEnvironmentVariable("GITHUB_OUTPUT")!, $"results={AllResults(plan, results).ToJsonString()}\nremaining={string.Join(",", remaining)}\n").ConfigureAwait(false);
+var outputs = $"results={AllResults(plan, results).ToJsonString()}\nremaining={string.Join(",", remaining)}\n";
+
+await File.AppendAllTextAsync(GetEnvironmentVariable("GITHUB_OUTPUT")!, outputs).ConfigureAwait(false);
 
 Console.Write(summary);
 
@@ -99,7 +102,9 @@ internal static partial class Program
     {
         StringBuilder summary = new();
         _ = summary.AppendLine("## Release train").AppendLine();
-        _ = summary.AppendLine("| Level | Repository | Result | Version | Dependency updates | Pull request | Release |").AppendLine("|---|---|---|---|---|---|---|");
+        _ = summary.AppendLine(
+            "| Level | Repository | Result | Version | Dependency updates | Pull request | Release |")
+            .AppendLine("|---|---|---|---|---|---|---|");
         foreach (var step in plan)
         {
             AppendRow(summary, step, results);
@@ -116,8 +121,12 @@ internal static partial class Program
         if (remaining.Count > 0)
         {
             _ = summary.AppendLine().AppendLine("### Resume").AppendLine();
-            _ = summary.AppendLine("Fix the failure, then run the release train again with these inputs. It picks up the versions this run already released.").AppendLine();
-            _ = summary.AppendLine("```text").AppendLine(CultureInfo.InvariantCulture, $"targets: {string.Join(", ", remaining)}").AppendLine("includeDownstream: false").AppendLine("```");
+            _ = summary.AppendLine(
+                "Fix the failure, then rerun with these inputs. Versions already released will be reused.")
+                .AppendLine();
+            _ = summary.AppendLine("```text").AppendLine(
+                CultureInfo.InvariantCulture,
+                $"targets: {string.Join(", ", remaining)}").AppendLine("includeDownstream: false").AppendLine("```");
         }
 
         return summary.ToString();
@@ -132,7 +141,7 @@ internal static partial class Program
         JsonArray all = [];
         foreach (var step in plan)
         {
-            all.Add(results.GetValueOrDefault(step.Name)?.DeepClone() ?? new JsonObject { [NameKey] = step.Name, [StatusKey] = NotStarted });
+            all.Add(results.GetValueOrDefault(step.Name)?.DeepClone() ?? new JsonObject { [NameKey] = step.Name, [StatusKey] = NotStarted, });
         }
 
         return all;
@@ -143,8 +152,10 @@ internal static partial class Program
     /// <param name="name">The repository.</param>
     /// <returns>The status, or "not started" when it has no result.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static string Status(Dictionary<string, JsonObject> results, string name) =>
-        results.GetValueOrDefault(name)?[StatusKey]?.GetValue<string>() ?? NotStarted;
+    private static string Status(
+        Dictionary<string, JsonObject> results,
+        string name) => results.GetValueOrDefault(name)?[StatusKey]?.GetValue<string>()
+    ?? NotStarted;
 
     /// <summary>Gets the result column: "already released" for a reused release, otherwise the status.</summary>
     /// <param name="result">The repository's result, if any.</param>
@@ -152,8 +163,12 @@ internal static partial class Program
     /// <param name="name">The repository.</param>
     /// <returns>The result text.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static string Outcome(JsonObject? result, Dictionary<string, JsonObject> results, string name) =>
-        result?["reused"]?.GetValue<bool>() is true ? "already released" : Status(results, name);
+    private static string Outcome(
+        JsonObject? result,
+        Dictionary<string, JsonObject> results,
+        string name) => result?["reused"]?.GetValue<bool>() is true
+            ? "already released"
+            : Status(results, name);
 
     /// <summary>Formats a Markdown link, or a dash when there is no URL.</summary>
     /// <param name="url">The URL.</param>
@@ -173,7 +188,12 @@ internal static partial class Program
         var updates = result?[UpdatesKey]?.AsArray().Count ?? 0;
         var pullRequest = Link(result?["pullRequest"], "pull request");
         var release = Link(result?["releaseUrl"], "release");
-        _ = summary.AppendLine(CultureInfo.InvariantCulture, $"| {step.Level} | {step.Name} | {Outcome(result, results, step.Name)} | {version} | {updates} | {pullRequest} | {release} |");
+        _ = summary.AppendLine(
+            CultureInfo.InvariantCulture,
+            $"| {step.Level} | {step.Name} | {Outcome(
+    result,
+    results,
+    step.Name)} | {version} | {updates} | {pullRequest} | {release} |");
     }
 
     /// <summary>Appends one repository's message, updates, notes and packages.</summary>
@@ -191,10 +211,14 @@ internal static partial class Program
 
         if (updates.Count > 0)
         {
-            _ = summary.AppendLine("| File | Package or property | From | To | Source |").AppendLine("|---|---|---|---|---|");
+            _ = summary.AppendLine("| File | Package or property | From | To | Source |")
+                .AppendLine("|---|---|---|---|---|");
             foreach (var update in updates)
             {
-                _ = summary.AppendLine(CultureInfo.InvariantCulture, $"| `{update!["file"]}` | `{update["item"]}` | {update["from"]} | {update["to"]} | {update["source"]} |");
+                _ = summary.AppendLine(
+                    CultureInfo.InvariantCulture,
+                    $"| `{update!["file"]}` | `{update["item"]}` | {update["from"]} | "
+                    + $"{update["to"]} | {update["source"]} |");
             }
 
             _ = summary.AppendLine();
