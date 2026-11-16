@@ -90,6 +90,7 @@ Actions only when something under `.github` changed. Skipped jobs still pass req
 | `certum-sign` | Signs `.nupkg` files with the SafeSign tool and verifies them. |
 | `dotnet-benchmarks` | Checks out a commit and runs benchmark projects for the A/B workflow. |
 | `detect-changes` | Reports whether a push or pull request changes files under `.github`, files outside it, or both. |
+| `validate-scripts` | Compiles every action script with its shared sources and treats compiler and analyzer warnings as errors. |
 
 ## Steps are written in C#
 
@@ -119,6 +120,19 @@ Every script follows these rules:
   folder it runs in. The temp folder keeps the calling repository's settings out of the script.
 - **The script needs the .NET 11 SDK.** A job runs `dotnet-environment` before its first script.
 - **A script declares what it needs at the top.** For example, `#:package Name@Version` adds a package.
+
+The `Validate scripts` workflow builds every script on .NET 11 when C# files, action definitions or build settings
+change. It also runs on manual dispatch. Other changes skip the build step and still report a successful check.
+The check compiles scripts without running their actions.
+
+To run the same check locally from this repository:
+
+```bash
+dotnet run --file .github/actions/validate-scripts/validate-scripts.cs -- build
+```
+
+Each action's entry point is `<action-name>.cs`. The check includes its `Program.*.cs` companion files and the
+shared GitHub sources when its `action.yml` passes `ActionSharedSources`.
 
 ## How a version is chosen
 

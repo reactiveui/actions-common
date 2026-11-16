@@ -1,0 +1,40 @@
+name: Validate scripts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build and analyze scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET Environment
+        uses: ./.github/actions/dotnet-environment
+        with:
+          stamp-version: 'false'
+
+      - name: Detect script changes
+        id: changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        working-directory: ${{ runner.temp }}
+        run: dotnet run --file "$GITHUB_WORKSPACE/.github/actions/validate-scripts/validate-scripts.cs" -- changes "$EVENT_NAME" "$BEFORE"
+
+      - name: Validate scripts
+        if: steps.changes.outputs.scripts == 'true'
+        uses: ./.github/actions/validate-scripts

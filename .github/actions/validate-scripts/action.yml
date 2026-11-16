@@ -1,0 +1,10 @@
+name: Validate scripts
+description: Compile every action script with its shared sources and fail on compiler or analyzer warnings.
+
+runs:
+  using: composite
+  steps:
+    - name: Build scripts
+      shell: bash
+      working-directory: ${{ runner.temp }}
+      run: dotnet run --file "$GITHUB_ACTION_PATH/validate-scripts.cs" -- build
