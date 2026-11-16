@@ -4,7 +4,7 @@
 // See the LICENSE file in the project root for full license information.
 
 #:property TargetFramework=net11.0
-#:package Refit@16.4.0
+#:package Refit@17.0.0
 
 using System.Buffers.Text;
 using System.Globalization;
