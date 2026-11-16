@@ -116,7 +116,7 @@ Every script follows these rules:
 
 - **Inputs arrive through `env:`.** The step passes them to the script as arguments. The script text never
   contains `${{ }}`, so a value from a pull request cannot change the script's code.
-- **The step runs from `$RUNNER_TEMP`.** `dotnet run` reads `global.json` and `Directory.Build.props` from the
+- **The step runs from `$RUNNER_TEMP`.** `dotnet run` reads `Directory.Build.props` from the
   folder it runs in. The temp folder keeps the calling repository's settings out of the script.
 - **The script needs the .NET 11 SDK.** A job runs `dotnet-environment` before its first script.
 - **A script declares what it needs at the top.** For example, `#:package Name@Version` adds a package.

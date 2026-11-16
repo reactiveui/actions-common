@@ -77,7 +77,7 @@ return 0;
   request or a fork's branch name would become code.
 - **Secrets stay in the environment.** Read them with `GetEnvironmentVariable`. Arguments show up in the process
   list.
-- **Run from `$RUNNER_TEMP`.** `dotnet run` reads `global.json`, `Directory.Build.props` and analyzers from the
+- **Run from `$RUNNER_TEMP`.** `dotnet run` reads `Directory.Build.props` and analyzers from the
   current folder and its parents. Change to `GITHUB_WORKSPACE` inside the script when it needs the checkout.
 - **Check the argument count with a list pattern.** Report a mismatch with `::error::` and return 2.
 - **Return the exit code** of anything that fails. Report errors as `::error::` lines.
