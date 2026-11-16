@@ -2,27 +2,5 @@
     "$schema": "https://docs.renovatebot.com/renovate-schema.json",
     "extends": [
         "local>reactiveui/.github:renovate"
-    ],
-    "customManagers": [
-        {
-            "customType": "regex",
-            "managerFilePatterns": [
-                "/^\\.github/actions/certum-sign/action\\.yml$/"
-            ],
-            "matchStrings": [
-                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+default: '(?<currentValue>[^']+)'"
-            ]
-        },
-        {
-            "description": "Default Windows App Runtime for WinUI tests. The runtime installer is published per Microsoft.WindowsAppSDK major.minor, so track the latest stable NuGet release and keep only its major.minor.",
-            "customType": "regex",
-            "managerFilePatterns": [
-                "/^\\.github/workflows/workflow-common-(setup-and-build|sonarcloud)\\.yml$/"
-            ],
-            "matchStrings": [
-                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+default: '(?<currentValue>\\d+\\.\\d+)'"
-            ],
-            "extractVersionTemplate": "^(?<version>\\d+\\.\\d+)\\.\\d+$"
-        }
     ]
 }
